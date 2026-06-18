@@ -1,0 +1,43 @@
+# ── Node / OpenHarmony ──
+node_modules/
+.idea/
+*.log
+build/
+.cxx/
+.hvigor/
+local.properties
+.DS_Store
+/oh_modules/
+.hvigor/
+
+# ── Python ──
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+
+# ── 数据 / 运行时 ──
+*.db
+*.sqlite3
+data/
+mosquitto/data/
+
+# ── 证书 / 密钥 ──
+*.pem
+*.key
+*.crt
+!mosquitto/certs/.gitkeep
+
+# ── IDE ──
+.vscode/
+*.swp
+*.swo
+
+# ── 系统文件 ──
+Thumbs.db
+*.tmp
+
+# ── Claude Code 本地配置 ──
+.claude/
