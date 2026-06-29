@@ -152,6 +152,31 @@ def seed_data(conn: sqlite3.Connection):
         "(11, 2, 'ac', '卧室空调', 'haier', 'home/bedroom/ac', '{\"power\":\"off\",\"mode\":\"cool\",\"temp\":26}')"
     )
 
+    # ── 场景 ──
+    conn.execute(
+        "INSERT INTO scenes (id, name, icon, description, actions_json) VALUES "
+        "(1, '回家模式', '🏠', '到家一键开启：客厅灯亮 + 空调制冷 + 门禁解锁', "
+        "'[{\"device_type\":\"light\",\"room_id\":\"livingroom\",\"action\":\"on\",\"params\":{\"brightness\":80}},"
+        "{\"device_type\":\"ac\",\"room_id\":\"livingroom\",\"action\":\"set\",\"params\":{\"power\":\"on\",\"mode\":\"cool\",\"temp\":26}},"
+        "{\"device_type\":\"door_lock\",\"room_id\":\"livingroom\",\"action\":\"unlock\",\"params\":{\"auth_code\":\"scene-trigger\"}}]')"
+    )
+    conn.execute(
+        "INSERT INTO scenes (id, name, icon, description, actions_json) VALUES "
+        "(2, '离家模式', '🚪', '出门一键关闭：所有灯灭 + 空调关闭 + 门禁上锁', "
+        "'[{\"device_type\":\"light\",\"room_id\":\"livingroom\",\"action\":\"off\",\"params\":{}},"
+        "{\"device_type\":\"light\",\"room_id\":\"bedroom\",\"action\":\"off\",\"params\":{}},"
+        "{\"device_type\":\"ac\",\"room_id\":\"livingroom\",\"action\":\"off\",\"params\":{}},"
+        "{\"device_type\":\"ac\",\"room_id\":\"bedroom\",\"action\":\"off\",\"params\":{}},"
+        "{\"device_type\":\"door_lock\",\"room_id\":\"livingroom\",\"action\":\"lock\",\"params\":{}}]')"
+    )
+    conn.execute(
+        "INSERT INTO scenes (id, name, icon, description, actions_json) VALUES "
+        "(3, '睡眠模式', '🌙', '睡前设置：卧室灯暗光 + 空调设为26°C', "
+        "'[{\"device_type\":\"light\",\"room_id\":\"bedroom\",\"action\":\"on\",\"params\":{\"brightness\":30,\"color\":\"warm\"}},"
+        "{\"device_type\":\"ac\",\"room_id\":\"bedroom\",\"action\":\"set\",\"params\":{\"power\":\"on\",\"mode\":\"cool\",\"temp\":26,\"fan\":\"low\"}},"
+        "{\"device_type\":\"light\",\"room_id\":\"livingroom\",\"action\":\"off\",\"params\":{}}]')"
+    )
+
     # ── 联动规则 ──
     conn.execute(
         "INSERT INTO automation_rules (id, name, condition_json, action_json, enabled) VALUES "

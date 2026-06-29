@@ -22,11 +22,15 @@ services:
       - DATABASE_URL=sqlite:///data/smart_home.db
       - MQTT_BROKER=mqtt
       - MQTT_PORT=1883
+      - MQTT_USE_TLS=true
+      - MQTT_TLS_PORT=8883
+      - MQTT_CA_CERTS=/certs/server.crt
       - JWT_SECRET=${JWT_SECRET:-smart-home-a9-secret}
       - JWT_EXPIRE_HOURS=24
       - DEBUG=true
     volumes:
       - ./data:/app/data
+      - ./mosquitto/certs:/certs:ro
     depends_on:
       - mqtt
     restart: unless-stopped

@@ -1,9 +1,7 @@
-/**
- * 门禁控制页 — 远程开锁/上锁
- */
 import { router } from '@kit.ArkUI'
-import { getDevices, sendCommand } from '../common/ApiClient'
-import { Device, DeviceStatus } from '../model/DeviceModel'
+import { getDevices, sendCommand, getAesKey } from '../common/ApiClient'
+import { generateAuthCode } from '../common/CryptoUtil'
+import { Device, DeviceStatus, parseDeviceStatus, CommandParams } from '../model/DeviceModel'
 
 @Entry
 @Component
@@ -13,44 +11,81 @@ struct DoorLockPage {
   @State isLocked: boolean = true
   @State isLoading: boolean = false
   @State lastAction: string = ''
+  @State autoLockCountdown: number = 0
+  private autoLockTimer: number = -1
 
   aboutToAppear() {
     this.loadLocks()
   }
 
+  aboutToDisappear() {
+    this.clearAutoLockTimer()
+  }
+
+  clearAutoLockTimer() {
+    if (this.autoLockTimer > 0) {
+      clearTimeout(this.autoLockTimer)
+      this.autoLockTimer = -1
+    }
+    this.autoLockCountdown = 0
+  }
+
+  startAutoLockTimer() {
+    this.clearAutoLockTimer()
+    this.autoLockCountdown = 5
+    let tick = () => {
+      this.autoLockCountdown--
+      if (this.autoLockCountdown <= 0) {
+        this.autoLockCountdown = 0
+        this.toggleLock()
+        return
+      }
+      if (this.isLocked) {
+        this.clearAutoLockTimer()
+        return
+      }
+      this.autoLockTimer = setTimeout(tick, 1000)
+    }
+    this.autoLockTimer = setTimeout(tick, 1000)
+  }
+
   async loadLocks() {
     try {
-      const devices = await getDevices(undefined, 'door_lock')
-      this.locks = devices as Device[]
+      let devices = await getDevices(undefined, 'door_lock')
+      this.locks = devices
       if (this.locks.length > 0) {
         this.parseStatus(this.locks[0])
       }
     } catch (err) {
-      console.error('加载门禁设备失败', err)
+      console.error('Load locks failed', err)
     }
   }
 
   parseStatus(device: Device) {
-    try {
-      const status: DeviceStatus = JSON.parse(device.status_json || '{}')
-      this.isLocked = status.locked !== false
-    } catch {
-      // ignore
-    }
+    let status = parseDeviceStatus(device.status_json)
+    this.isLocked = status.locked
   }
 
   async toggleLock() {
     this.isLoading = true
     try {
-      const device = this.locks[this.selectedLock]
+      let device = this.locks[this.selectedLock]
       if (this.isLocked) {
-        await sendCommand(device.id, 'unlock', { auth_code: 'demo-auth-code' })
-        this.lastAction = '开锁成功'
+        let aesKey = getAesKey()
+        let encryptedAuth = await generateAuthCode(aesKey)
+        let params = new CommandParams()
+        params.auth_code = encryptedAuth
+        await sendCommand(device.id, 'unlock', params)
+        this.lastAction = '开锁成功 (已加密)'
       } else {
+        this.clearAutoLockTimer()
         await sendCommand(device.id, 'lock')
         this.lastAction = '上锁成功'
       }
       this.isLocked = !this.isLocked
+      if (!this.isLocked) {
+        this.startAutoLockTimer()
+      }
     } catch (err) {
       this.lastAction = '操作失败: ' + (err as Error).message
     } finally {
@@ -60,7 +95,6 @@ struct DoorLockPage {
 
   build() {
     Column() {
-      // 顶部栏
       Row() {
         Text('<')
           .fontSize(24)
@@ -82,9 +116,8 @@ struct DoorLockPage {
       })
 
       Column() {
-        // 门锁状态大图
         Column() {
-          Text(this.isLocked ? '🔒' : '🔓')
+          Text(this.isLocked ? '\uD83D\uDD12' : '\uD83D\uDD13')
             .fontSize(80)
           Text(this.isLocked ? '已锁定' : '已解锁')
             .fontSize(24)
@@ -101,8 +134,7 @@ struct DoorLockPage {
         .justifyContent(FlexAlign.Center)
         .margin({ top: 60, bottom: 40 })
 
-        // 操作按钮
-        Button(this.isLoading ? '处理中...' : (this.isLocked ? '🔓 开 锁' : '🔒 上 锁'))
+        Button(this.isLoading ? '处理中...' : (this.isLocked ? '\uD83D\uDD13 开 锁' : '\uD83D\uDD12 上 锁'))
           .type(ButtonType.Capsule)
           .width('70%')
           .height(56)
@@ -112,7 +144,6 @@ struct DoorLockPage {
           .enabled(!this.isLoading)
           .onClick(() => this.toggleLock())
 
-        // 操作记录
         if (this.lastAction) {
           Text(this.lastAction)
             .fontSize(14)
@@ -120,9 +151,8 @@ struct DoorLockPage {
             .margin({ top: 20 })
         }
 
-        // 安全提示
         Row() {
-          Text('⚠️')
+          Text('\u26A0\uFE0F')
             .fontSize(14)
           Text('门禁操作已加密传输（AES-256 + JWT）')
             .fontSize(12)
@@ -130,10 +160,9 @@ struct DoorLockPage {
         }
         .margin({ top: 40 })
 
-        // 开锁动画效果区域
-        if (!this.isLocked) {
+        if (!this.isLocked && this.autoLockCountdown > 0) {
           Row() {
-            Text('门锁已打开，5秒后自动上锁')
+            Text(`\u23F1\uFE0F ${this.autoLockCountdown}秒后自动上锁`)
               .fontSize(13)
               .fontColor('#FF9800')
           }

@@ -18,22 +18,39 @@ class RuleEngine:
     def __init__(self):
         self._rules: list[dict] = []
         self._device_states: dict[int, dict] = {}  # device_id -> status
+        self._device_id_map: dict[str, int] = {}     # "room_id/type" -> device_id
         self._lock = threading.Lock()
 
     def reload_rules(self):
-        """从数据库重新加载所有启用的规则"""
+        """从数据库重新加载所有启用的规则，并构建设备索引"""
         with get_db() as conn:
             rows = conn.execute(
                 "SELECT * FROM automation_rules WHERE enabled = 1"
             ).fetchall()
+            # 构建设备 ID 索引（一次性加载全部，避免后续每条消息都查 DB）
+            devices = conn.execute(
+                "SELECT id, type, mqtt_topic FROM devices"
+            ).fetchall()
         with self._lock:
             self._rules = [dict(r) for r in rows]
-        logger.info(f"规则引擎已加载 {len(self._rules)} 条规则")
+            self._device_id_map.clear()
+            for d in devices:
+                # mqtt_topic 格式: home/livingroom/temperature_sensor
+                parts = d["mqtt_topic"].split("/")
+                if len(parts) >= 3:
+                    key = f"{parts[1]}/{parts[2]}"  # e.g. "livingroom/temperature_sensor"
+                    self._device_id_map[key] = d["id"]
+        logger.info(f"规则引擎已加载 {len(self._rules)} 条规则, {len(self._device_id_map)} 个设备索引")
 
     def update_device_state(self, device_id: int, state: dict):
         """更新设备状态缓存"""
         with self._lock:
             self._device_states[device_id] = state
+
+    def _get_device_id(self, room_id: str, device_type: str) -> int | None:
+        """从索引中获取 device_id（无 DB 查询）"""
+        key = f"{room_id}/{device_type}"
+        return self._device_id_map.get(key)
 
     def on_sensor_data(self, topic: str, payload: Any):
         """收到传感器数据时触发规则检查"""
@@ -44,21 +61,16 @@ class RuleEngine:
                 return
 
         # 从 topic 解析 room_id 和设备类型
-        # topic 格式: home/{room}/{device_type} 或 home/{room}/{device_type}/sensor
         parts = topic.split("/")
         if len(parts) < 3:
             return
         room_id = parts[1]
-        sensor_type = parts[2]  # 设备类型在第三段（如 temperature_sensor, pir_sensor）
+        sensor_type = parts[2]
 
-        # 更新设备状态缓存
-        with get_db() as conn:
-            device = conn.execute(
-                "SELECT id FROM devices WHERE mqtt_topic LIKE ?",
-                (f"%/{room_id}/sensor/{sensor_type}",)
-            ).fetchone()
-            if device:
-                self.update_device_state(device["id"], payload)
+        # 更新设备状态缓存（使用索引，无 DB 查询）
+        device_id = self._get_device_id(room_id, sensor_type)
+        if device_id is not None:
+            self.update_device_state(device_id, payload)
 
         # 检查所有规则
         with self._lock:
@@ -88,12 +100,10 @@ class RuleEngine:
         if actual is None:
             return False
 
-        # 比较
-        result = self._compare(actual, operator, expected)
-        if not result:
+        if not self._compare(actual, operator, expected):
             return False
 
-        # 检查附加条件（and）
+        # 检查附加条件（and）— 全部从内存缓存查找
         and_conditions = condition.get("and", [])
         for sub in and_conditions:
             sub_trigger = sub.get("trigger")
@@ -101,7 +111,6 @@ class RuleEngine:
             sub_op = sub.get("operator")
             sub_val = sub.get("value")
 
-            # 从设备状态缓存中查找
             sub_state = self._find_device_state(sub_trigger, room_id)
             if sub_state is None:
                 return False
@@ -128,19 +137,15 @@ class RuleEngine:
         elif operator == "lte":
             return float(actual) <= float(expected)
         elif operator == "changed":
-            return True  # 简化：值变化即触发
+            return True
         return False
 
     def _find_device_state(self, device_type: str, room_id: str) -> dict | None:
-        """从缓存中查找指定房间、指定类型的设备状态"""
-        with get_db() as conn:
-            device = conn.execute(
-                "SELECT id FROM devices WHERE type = ? AND mqtt_topic LIKE ?",
-                (device_type, f"%/{room_id}/%")
-            ).fetchone()
-        if device:
+        """从内存缓存中查找指定房间、指定类型的设备状态"""
+        device_id = self._get_device_id(room_id, device_type)
+        if device_id is not None:
             with self._lock:
-                return self._device_states.get(device["id"])
+                return self._device_states.get(device_id)
         return None
 
     def _execute_actions(self, actions: list[dict], room_id: str):

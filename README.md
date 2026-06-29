@@ -41,7 +41,7 @@ smart-home-A9/
 
 - **APP**: DevEco Studio + ArkTS + ArkUI (Stage模型)
 - **通信**: MQTT over TLS
-- **后端**: Python 3.11 + FastAPI + EMQX
+- **后端**: Python 3.11 + FastAPI + Eclipse Mosquitto
 - **安全**: JWT + AES-256-CBC + bcrypt
 - **部署**: Docker Compose + Nginx
 

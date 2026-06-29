@@ -13,7 +13,7 @@ router = APIRouter(prefix="/api/data", tags=["历史数据"])
 @router.get("/sensors")
 def get_sensor_data(
     device_id: Optional[int] = None,
-    type: Optional[str] = None,
+    data_type: Optional[str] = None,
     start: Optional[str] = None,
     end: Optional[str] = None,
     limit: int = Query(100, le=1000),
@@ -25,9 +25,9 @@ def get_sensor_data(
     if device_id:
         query += " AND device_id = ?"
         params.append(device_id)
-    if type:
+    if data_type:
         query += " AND data_type = ?"
-        params.append(type)
+        params.append(data_type)
     if start:
         query += " AND timestamp >= ?"
         params.append(start)

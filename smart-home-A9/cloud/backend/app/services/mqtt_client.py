@@ -8,7 +8,7 @@ from typing import Callable, Optional
 
 import paho.mqtt.client as mqtt
 
-from app.config import MQTT_BROKER, MQTT_PORT, MQTT_USE_TLS, MQTT_TLS_PORT, MQTT_USERNAME, MQTT_PASSWORD
+from app.config import MQTT_BROKER, MQTT_PORT, MQTT_USE_TLS, MQTT_TLS_PORT, MQTT_USERNAME, MQTT_PASSWORD, MQTT_CA_CERTS
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +67,10 @@ def init_mqtt():
     if MQTT_USERNAME:
         _client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
     if MQTT_USE_TLS:
-        _client.tls_set()
+        if MQTT_CA_CERTS:
+            _client.tls_set(ca_certs=MQTT_CA_CERTS)
+        else:
+            _client.tls_set()  # 使用系统 CA 证书
 
     port = MQTT_TLS_PORT if MQTT_USE_TLS else MQTT_PORT
     try:

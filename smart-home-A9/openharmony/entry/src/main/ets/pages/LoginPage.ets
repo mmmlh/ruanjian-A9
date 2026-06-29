@@ -1,6 +1,3 @@
-/**
- * 登录页
- */
 import { router } from '@kit.ArkUI'
 import { login } from '../common/ApiClient'
 
@@ -14,7 +11,6 @@ struct LoginPage {
 
   build() {
     Column() {
-      // 顶部装饰
       Row()
         .width('100%')
         .height(200)
@@ -23,9 +19,7 @@ struct LoginPage {
           colors: [['#1A3C6E', 0.0], ['#2B579A', 1.0]]
         })
 
-      // 登录卡片
       Column() {
-        // 标题
         Text('智能家居控制系统')
           .fontSize(24)
           .fontWeight(FontWeight.Bold)
@@ -37,7 +31,6 @@ struct LoginPage {
           .fontColor('#999')
           .margin({ bottom: 30 })
 
-        // 用户名
         TextInput({ placeholder: '请输入用户名', text: this.username })
           .type(InputType.Normal)
           .height(50)
@@ -48,7 +41,6 @@ struct LoginPage {
           .margin({ bottom: 16 })
           .onChange((value: string) => { this.username = value })
 
-        // 密码
         TextInput({ placeholder: '请输入密码', text: this.password })
           .type(InputType.Password)
           .height(50)
@@ -59,7 +51,6 @@ struct LoginPage {
           .margin({ bottom: 16 })
           .onChange((value: string) => { this.password = value })
 
-        // 错误提示
         if (this.errorMsg) {
           Text(this.errorMsg)
             .fontSize(13)
@@ -68,7 +59,6 @@ struct LoginPage {
             .width('100%')
         }
 
-        // 登录按钮
         Button(this.isLoading ? '登录中...' : '登 录')
           .type(ButtonType.Capsule)
           .width('100%')
@@ -78,7 +68,6 @@ struct LoginPage {
           .enabled(!this.isLoading)
           .onClick(() => this.doLogin())
 
-        // 注册入口
         Row() {
           Text('没有账号？')
             .fontSize(13)
@@ -112,8 +101,7 @@ struct LoginPage {
     this.isLoading = true
     this.errorMsg = ''
     try {
-      const result = await login(this.username, this.password)
-      // 跳转到仪表盘
+      await login(this.username, this.password)
       router.replaceUrl({ url: 'pages/DashboardPage' })
     } catch (err) {
       this.errorMsg = (err as Error).message || '登录失败'

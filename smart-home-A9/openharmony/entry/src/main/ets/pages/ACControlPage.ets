@@ -1,19 +1,27 @@
-/**
- * 空调控制页 — 温度、模式、风速、品牌切换
- */
 import { router } from '@kit.ArkUI'
 import { getDevices, sendCommand } from '../common/ApiClient'
-import { Device, DeviceStatus } from '../model/DeviceModel'
+import { Device, DeviceStatus, parseDeviceStatus, CommandParams } from '../model/DeviceModel'
 
-const MODES = [
-  { label: '制冷', value: 'cool', icon: '❄️' },
-  { label: '制热', value: 'heat', icon: '🔥' },
-  { label: '除湿', value: 'dehumidify', icon: '💧' },
-  { label: '送风', value: 'fan_only', icon: '🌀' },
-  { label: '自动', value: 'auto', icon: '🔄' },
+class ModeItem {
+  label: string = ''
+  value: string = ''
+  icon: string = ''
+}
+
+class FanItem {
+  label: string = ''
+  value: string = ''
+}
+
+let MODES: ModeItem[] = [
+  { label: '制冷', value: 'cool', icon: '\u2744\uFE0F' },
+  { label: '制热', value: 'heat', icon: '\uD83D\uDD25' },
+  { label: '除湿', value: 'dehumidify', icon: '\uD83D\uDCA7' },
+  { label: '送风', value: 'fan_only', icon: '\uD83C\uDF00' },
+  { label: '自动', value: 'auto', icon: '\uD83D\uDD04' },
 ]
 
-const FANS = [
+let FANS: FanItem[] = [
   { label: '自动', value: 'auto' },
   { label: '低速', value: 'low' },
   { label: '中速', value: 'medium' },
@@ -38,76 +46,88 @@ struct ACControlPage {
 
   async loadACs() {
     try {
-      const devices = await getDevices(undefined, 'ac')
-      this.acs = devices as Device[]
+      let devices = await getDevices(undefined, 'ac')
+      this.acs = devices
       if (this.acs.length > 0) {
         this.parseStatus(this.acs[0])
       }
     } catch (err) {
-      console.error('加载空调设备失败', err)
+      console.error('Load AC failed', err)
     }
   }
 
   parseStatus(device: Device) {
-    try {
-      const status: DeviceStatus = JSON.parse(device.status_json || '{}')
-      this.isOn = status.power === 'on'
-      this.temp = status.temp || 26
-      this.mode = status.mode || 'cool'
-      this.fan = status.fan || 'auto'
-      this.brand = status.brand || device.brand || 'gree'
-    } catch {
-      // ignore
-    }
+    let status = parseDeviceStatus(device.status_json)
+    this.isOn = status.power === 'on'
+    this.temp = status.temp || 26
+    this.mode = status.mode || 'cool'
+    this.fan = status.fan || 'auto'
+    this.brand = status.brand || device.brand || 'gree'
   }
 
   async toggleAC() {
     this.isLoading = true
     try {
-      const device = this.acs[this.selectedAC]
+      let device = this.acs[this.selectedAC]
       if (this.isOn) {
         await sendCommand(device.id, 'off')
       } else {
-        await sendCommand(device.id, 'set', {
-          power: 'on', mode: this.mode, temp: this.temp, fan: this.fan
-        })
+        let params = new CommandParams()
+        params.mode = this.mode
+        params.temp = this.temp
+        params.fan = this.fan
+        await sendCommand(device.id, 'set', params)
       }
       this.isOn = !this.isOn
     } catch (err) {
-      console.error('操作失败', err)
+      console.error('Toggle AC failed', err)
     } finally {
       this.isLoading = false
     }
   }
 
   async setTemp(delta: number) {
-    const newTemp = Math.max(16, Math.min(30, this.temp + delta))
+    let newTemp = Math.max(16, Math.min(30, this.temp + delta))
     this.temp = newTemp
     if (this.isOn) {
-      const device = this.acs[this.selectedAC]
-      await sendCommand(device.id, 'set', { temp: newTemp })
+      let device = this.acs[this.selectedAC]
+      let params = new CommandParams()
+      params.temp = newTemp
+      await sendCommand(device.id, 'set', params)
     }
   }
 
   async setMode(newMode: string) {
     this.mode = newMode
     if (this.isOn) {
-      const device = this.acs[this.selectedAC]
-      await sendCommand(device.id, 'set', { mode: newMode })
+      let device = this.acs[this.selectedAC]
+      let params = new CommandParams()
+      params.mode = newMode
+      await sendCommand(device.id, 'set', params)
     }
   }
 
   async setFan(newFan: string) {
     this.fan = newFan
     if (this.isOn) {
-      const device = this.acs[this.selectedAC]
-      await sendCommand(device.id, 'set', { fan: newFan })
+      let device = this.acs[this.selectedAC]
+      let params = new CommandParams()
+      params.fan = newFan
+      await sendCommand(device.id, 'set', params)
     }
+  }
+
+  getModeLabel(modeValue: string): string {
+    for (let i = 0; i < MODES.length; i++) {
+      if (MODES[i].value === modeValue) {
+        return MODES[i].label
+      }
+    }
+    return ''
   }
 
   build() {
     Column() {
-      // 顶部栏
       Row() {
         Text('<')
           .fontSize(24)
@@ -119,7 +139,6 @@ struct ACControlPage {
           .fontWeight(FontWeight.Bold)
           .fontColor(Color.White)
         Blank()
-        // 品牌标签
         Text(this.brand.toUpperCase())
           .fontSize(11)
           .fontColor(Color.White)
@@ -138,15 +157,14 @@ struct ACControlPage {
 
       Scroll() {
         Column() {
-          // 温度显示
           Column() {
-            Text(this.isOn ? '🌡️' : '🔌')
+            Text(this.isOn ? '\uD83C\uDF21\uFE0F' : '\uD83D\uDD0C')
               .fontSize(40)
             Text(`${this.temp}°C`)
               .fontSize(56)
               .fontWeight(FontWeight.Bold)
               .fontColor(this.isOn ? '#1A3C6E' : '#CCC')
-            Text(this.isOn ? MODES.find(m => m.value === this.mode)?.label || '' : '已关闭')
+            Text(this.isOn ? this.getModeLabel(this.mode) : '已关闭')
               .fontSize(16)
               .fontColor('#666')
           }
@@ -154,7 +172,6 @@ struct ACControlPage {
           .padding(30)
           .alignItems(HorizontalAlign.Center)
 
-          // 温度加减按钮
           Row() {
             Button('-')
               .type(ButtonType.Circle)
@@ -180,7 +197,6 @@ struct ACControlPage {
           .justifyContent(FlexAlign.Center)
           .margin({ bottom: 30 })
 
-          // 开关按钮
           Button(this.isOn ? '关闭空调' : '开启空调')
             .type(ButtonType.Capsule)
             .width('80%')
@@ -190,7 +206,6 @@ struct ACControlPage {
             .onClick(() => this.toggleAC())
             .margin({ bottom: 30 })
 
-          // 模式选择
           Column() {
             Text('运行模式')
               .fontSize(15)
@@ -199,7 +214,7 @@ struct ACControlPage {
               .width('100%')
 
             GridRow({ columns: 5, gutter: 8 }) {
-              ForEach(MODES, (m: { label: string; value: string; icon: string }) => {
+              ForEach(MODES, (m: ModeItem) => {
                 GridCol() {
                   Column() {
                     Text(m.icon).fontSize(20)
@@ -221,7 +236,6 @@ struct ACControlPage {
           .shadow({ radius: 4, color: '#1A000000', offsetY: 2 })
           .margin({ bottom: 16 })
 
-          // 风速选择
           Column() {
             Text('风速')
               .fontSize(15)
@@ -230,7 +244,7 @@ struct ACControlPage {
               .width('100%')
 
             Row() {
-              ForEach(FANS, (f: { label: string; value: string }) => {
+              ForEach(FANS, (f: FanItem) => {
                 Text(f.label)
                   .fontSize(13)
                   .fontColor(this.fan === f.value ? Color.White : '#666')
@@ -238,9 +252,9 @@ struct ACControlPage {
                   .borderRadius(20)
                   .backgroundColor(this.fan === f.value ? '#1A3C6E' : '#F0F0F0')
                   .onClick(() => this.setFan(f.value))
+                  .margin({ right: 8 })
               })
             }
-            .space(8)
           }
           .padding(16)
           .borderRadius(12)

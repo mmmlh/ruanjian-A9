@@ -1,9 +1,6 @@
-/**
- * 照明控制页 — 开关灯、亮度、色温
- */
 import { router } from '@kit.ArkUI'
 import { getDevices, sendCommand } from '../common/ApiClient'
-import { Device, DeviceStatus } from '../model/DeviceModel'
+import { Device, DeviceStatus, parseDeviceStatus, CommandParams } from '../model/DeviceModel'
 
 @Entry
 @Component
@@ -11,70 +8,89 @@ struct LightControlPage {
   @State lights: Device[] = []
   @State selectedLight: number = 0
   @State isOn: boolean = false
-  @State brightness: number = 80
+  @State brightnessValue: number = 80
   @State colorMode: string = 'warm'
   @State isLoading: boolean = false
+  private brightnessTimer: number = -1
 
   aboutToAppear() {
     this.loadLights()
   }
 
+  aboutToDisappear() {
+    if (this.brightnessTimer > 0) {
+      clearTimeout(this.brightnessTimer)
+    }
+  }
+
   async loadLights() {
     try {
-      const devices = await getDevices(undefined, 'light')
-      this.lights = devices as Device[]
+      let devices = await getDevices(undefined, 'light')
+      this.lights = devices
       if (this.lights.length > 0) {
         this.parseStatus(this.lights[0])
       }
     } catch (err) {
-      console.error('加载灯设备失败', err)
+      console.error('Load lights failed', err)
     }
   }
 
   parseStatus(device: Device) {
-    try {
-      const status: DeviceStatus = JSON.parse(device.status_json || '{}')
-      this.isOn = status.power === 'on'
-      this.brightness = status.brightness || 80
-      this.colorMode = status.color || 'warm'
-    } catch {
-      // ignore
-    }
+    let status = parseDeviceStatus(device.status_json)
+    this.isOn = status.power === 'on'
+    this.brightnessValue = status.brightness || 80
+    this.colorMode = status.color || 'warm'
   }
 
   async toggleLight() {
     this.isLoading = true
     try {
-      const device = this.lights[this.selectedLight]
-      const action = this.isOn ? 'off' : 'on'
-      await sendCommand(device.id, action, this.isOn ? {} : { brightness: this.brightness, color: this.colorMode })
+      let device = this.lights[this.selectedLight]
+      let action = this.isOn ? 'off' : 'on'
+      if (this.isOn) {
+        await sendCommand(device.id, action)
+      } else {
+        let params = new CommandParams()
+        params.brightness = this.brightnessValue
+        params.color = this.colorMode
+        await sendCommand(device.id, action, params)
+      }
       this.isOn = !this.isOn
     } catch (err) {
-      console.error('操作失败', err)
+      console.error('Toggle light failed', err)
     } finally {
       this.isLoading = false
     }
   }
 
-  async setBrightness(value: number) {
-    this.brightness = Math.round(value)
+  setBrightness(value: number) {
+    this.brightnessValue = Math.round(value)
+    if (this.brightnessTimer > 0) {
+      clearTimeout(this.brightnessTimer)
+    }
     if (this.isOn) {
-      const device = this.lights[this.selectedLight]
-      await sendCommand(device.id, 'set', { brightness: this.brightness })
+      let device = this.lights[this.selectedLight]
+      let targetBrightness = this.brightnessValue
+      this.brightnessTimer = setTimeout(() => {
+        let params = new CommandParams()
+        params.brightness = targetBrightness
+        sendCommand(device.id, 'set', params)
+      }, 300)
     }
   }
 
   async setColorMode(mode: string) {
     this.colorMode = mode
     if (this.isOn) {
-      const device = this.lights[this.selectedLight]
-      await sendCommand(device.id, 'set', { color: mode })
+      let device = this.lights[this.selectedLight]
+      let params = new CommandParams()
+      params.color = mode
+      await sendCommand(device.id, 'set', params)
     }
   }
 
   build() {
     Column() {
-      // 顶部栏
       Row() {
         Text('<')
           .fontSize(24)
@@ -97,7 +113,6 @@ struct LightControlPage {
 
       Scroll() {
         Column() {
-          // 灯选择器
           if (this.lights.length > 1) {
             Row() {
               ForEach(this.lights, (light: Device, index: number) => {
@@ -116,9 +131,8 @@ struct LightControlPage {
             .margin({ bottom: 20 })
           }
 
-          // 灯光开关大圆
           Column() {
-            Text(this.isOn ? '💡' : '🔌')
+            Text(this.isOn ? '\uD83D\uDCA1' : '\uD83D\uDD0C')
               .fontSize(60)
             Text(this.isOn ? '已开启' : '已关闭')
               .fontSize(18)
@@ -136,14 +150,13 @@ struct LightControlPage {
           .margin({ bottom: 30 })
           .onClick(() => this.toggleLight())
 
-          // 亮度滑块
           Column() {
             Row() {
               Text('亮度')
                 .fontSize(15)
                 .fontColor('#333')
               Blank()
-              Text(`${this.brightness}%`)
+              Text(`${this.brightnessValue}%`)
                 .fontSize(15)
                 .fontColor('#1A3C6E')
                 .fontWeight(FontWeight.Bold)
@@ -151,7 +164,7 @@ struct LightControlPage {
             .width('100%')
 
             Slider({
-              value: this.brightness,
+              value: this.brightnessValue,
               min: 0,
               max: 100,
               step: 1,
@@ -169,7 +182,6 @@ struct LightControlPage {
           .shadow({ radius: 4, color: '#1A000000', offsetY: 2 })
           .margin({ bottom: 16 })
 
-          // 色温选择
           Column() {
             Text('色温模式')
               .fontSize(15)
@@ -178,11 +190,18 @@ struct LightControlPage {
               .width('100%')
 
             Row() {
-              this.ColorChip('暖光', 'warm')
-              this.ColorChip('冷光', 'cool')
-              this.ColorChip('自然', 'natural')
+              Column() {
+                this.ColorChip('暖光', 'warm')
+              }
+              .margin({ right: 12 })
+              Column() {
+                this.ColorChip('冷光', 'cool')
+              }
+              .margin({ right: 12 })
+              Column() {
+                this.ColorChip('自然', 'natural')
+              }
             }
-            .space(12)
             .width('100%')
           }
           .padding(16)

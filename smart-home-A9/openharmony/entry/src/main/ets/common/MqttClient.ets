@@ -1,20 +1,16 @@
-/**
- * WebSocket 实时数据客户端
- * 通过 WebSocket 接收后端推送的传感器数据和设备状态
- */
 import { webSocket } from '@kit.NetworkKit'
+import { BusinessError } from '@kit.BasicServicesKit'
 import { getBaseUrl, getToken } from './ApiClient'
 
 let ws: webSocket.WebSocket | null = null
-let messageCallback: ((msg: Object) => void) | null = null
+let messageCallback: ((msg: string) => void) | null = null
+let statusCallback: ((connected: boolean) => void) | null = null
 let reconnectTimer: number = -1
 let isConnecting: boolean = false
 
-/**
- * 连接 WebSocket
- */
-export function connectWS(onMessage: (msg: Object) => void): void {
+export function connectWS(onMessage: (msg: string) => void, onStatus?: (connected: boolean) => void): void {
   messageCallback = onMessage
+  statusCallback = onStatus || null
   _doConnect()
 }
 
@@ -22,46 +18,47 @@ function _doConnect(): void {
   if (isConnecting) return
   isConnecting = true
 
-  const token = getToken()
-  const baseUrl = getBaseUrl().replace('http://', 'ws://')
-  const url = `${baseUrl}/ws/realtime?token=${token}`
+  let token = getToken()
+  let baseUrl = getBaseUrl().replace('http://', 'ws://')
+  let url = `${baseUrl}/ws/realtime?token=${token}`
 
   ws = webSocket.createWebSocket()
   ws!.on('open', () => {
-    console.info('WebSocket 已连接')
+    console.info('WebSocket connected')
     isConnecting = false
     if (reconnectTimer > 0) {
       clearInterval(reconnectTimer)
       reconnectTimer = -1
     }
+    if (statusCallback) {
+      statusCallback(true)
+    }
   })
 
-  ws!.on('message', (err: Error, data: string | ArrayBuffer) => {
+  ws!.on('message', (err: BusinessError, data: string | ArrayBuffer) => {
     if (typeof data === 'string') {
-      try {
-        const msg = JSON.parse(data)
-        if (messageCallback) {
-          messageCallback(msg)
-        }
-      } catch (e) {
-        console.error('WebSocket 消息解析失败', e)
+      if (messageCallback) {
+        messageCallback(data)
       }
     }
   })
 
   ws!.on('close', () => {
-    console.info('WebSocket 已断开')
+    console.info('WebSocket closed')
     isConnecting = false
+    if (statusCallback) {
+      statusCallback(false)
+    }
     _scheduleReconnect()
   })
 
-  ws!.on('error', (err: Error) => {
-    console.error('WebSocket 错误', err)
+  ws!.on('error', (err: BusinessError) => {
+    console.error('WebSocket error', err)
     isConnecting = false
   })
 
   ws!.connect(url).catch((err: Error) => {
-    console.error('WebSocket 连接失败', err)
+    console.error('WebSocket connect failed', err)
     isConnecting = false
     _scheduleReconnect()
   })
@@ -70,14 +67,11 @@ function _doConnect(): void {
 function _scheduleReconnect(): void {
   if (reconnectTimer > 0) return
   reconnectTimer = setInterval(() => {
-    console.info('WebSocket 尝试重连...')
+    console.info('WebSocket reconnecting...')
     _doConnect()
   }, 5000)
 }
 
-/**
- * 断开 WebSocket
- */
 export function disconnectWS(): void {
   if (reconnectTimer > 0) {
     clearInterval(reconnectTimer)

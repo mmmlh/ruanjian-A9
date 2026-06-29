@@ -1,6 +1,3 @@
-/**
- * 注册页
- */
 import { router } from '@kit.ArkUI'
 import { register } from '../common/ApiClient'
 

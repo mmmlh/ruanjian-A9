@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.eggs/
+*.egg-info/
+.venv/
+venv/
+
+# Tests
+tests/
+.pytest_cache/
+.pytest_cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Git
+.git/
+.gitignore
+
+# Data
+data/
+*.db
+*.sqlite3
+
+# Config (keep production secrets out of image)
+.env
+*.env

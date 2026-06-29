@@ -1,27 +1,24 @@
-/**
- * 仪表盘 — 总览所有房间设备状态
- */
 import { router } from '@kit.ArkUI'
 import { getRooms, getDevices, sendCommand, getToken } from '../common/ApiClient'
 import { connectWS, disconnectWS } from '../common/MqttClient'
-import { Room, Device, DeviceStatus } from '../model/DeviceModel'
+import { Room, Device, DeviceStatus, parseDeviceStatus } from '../model/DeviceModel'
 
 @Entry
 @Component
 struct DashboardPage {
   @State rooms: Room[] = []
   @State devices: Device[] = []
-  @State currentRoom: number = 0 // 0=全部
+  @State currentRoom: number = 0
   @State wsConnected: boolean = false
-  @State sensorData: Record<string, string | number> = {} // 温湿度缓存
+  @State temperature: string = '--'
+  @State humidity: string = '--'
 
   aboutToAppear() {
     this.loadData()
-    // 连接 WebSocket
-    connectWS((msg: Object) => {
-      this.onWSMessage(msg)
-    })
-    this.wsConnected = true
+    connectWS(
+      (msg: string) => { this.onWSMessage(msg) },
+      (connected: boolean) => { this.wsConnected = connected }
+    )
   }
 
   aboutToDisappear() {
@@ -30,69 +27,128 @@ struct DashboardPage {
 
   async loadData() {
     try {
-      this.rooms = await getRooms() as Room[]
-      this.devices = await getDevices() as Device[]
+      this.rooms = await getRooms()
+      this.devices = await getDevices()
     } catch (err) {
-      console.error('加载数据失败', err)
+      console.error('Load data failed', err)
     }
   }
 
-  onWSMessage(msg: Object) {
-    const m = msg as Record<string, Object>
-    if (m['type'] === 'sensor_update') {
-      const data = m['data'] as Record<string, number>
-      if (data) {
-        Object.keys(data).forEach(key => {
-          this.sensorData[key] = data[key]
-        })
+  onWSMessage(msg: string) {
+    try {
+      let m: Record<string, Object> = JSON.parse(msg) as Record<string, Object>
+      let msgType = m['type']
+      if (msgType !== undefined && msgType !== null) {
+        let typeStr = msgType as string
+        if (typeStr === 'sensor_update') {
+          let dataObj = m['data']
+          if (dataObj !== undefined && dataObj !== null) {
+            let data = dataObj as Record<string, number>
+            let tempVal = data['temperature']
+            if (tempVal !== undefined && tempVal !== null) {
+              this.temperature = tempVal.toString()
+            }
+            let humVal = data['humidity']
+            if (humVal !== undefined && humVal !== null) {
+              this.humidity = humVal.toString()
+            }
+          }
+        } else if (typeStr === 'mqtt') {
+          let topicObj = m['topic']
+          let payloadObj = m['payload']
+          if (topicObj !== undefined && topicObj !== null && payloadObj !== undefined && payloadObj !== null) {
+            this.handleMqttUpdate(topicObj as string, payloadObj as Record<string, Object>)
+          }
+        }
+      }
+    } catch (e) {
+      console.error('WS message parse failed', e)
+    }
+  }
+
+  handleMqttUpdate(topic: string, payload: Record<string, Object>) {
+    let parts = topic.split('/')
+    if (parts.length < 4) return
+    let deviceType = parts[2]
+
+    let newDevices: Device[] = []
+    for (let i = 0; i < this.devices.length; i++) {
+      let d = this.devices[i]
+      if (d.mqtt_topic === `home/${parts[1]}/${deviceType}`) {
+        let updated = new Device()
+        updated.id = d.id
+        updated.room_id = d.room_id
+        updated.type = d.type
+        updated.name = d.name
+        updated.brand = d.brand
+        updated.mqtt_topic = d.mqtt_topic
+        updated.status_json = JSON.stringify(payload)
+        updated.room_name = d.room_name
+        newDevices.push(updated)
+      } else {
+        newDevices.push(d)
+      }
+    }
+    this.devices = newDevices
+
+    if (deviceType === 'temperature_sensor') {
+      let val = payload['value']
+      if (val !== undefined && val !== null) {
+        this.temperature = (val as number).toString()
+      }
+    } else if (deviceType === 'humidity_sensor') {
+      let val = payload['value']
+      if (val !== undefined && val !== null) {
+        this.humidity = (val as number).toString()
       }
     }
   }
 
   getDevicesByRoom(roomId: number): Device[] {
     if (roomId === 0) return this.devices
-    return this.devices.filter(d => d.room_id === roomId)
+    let filtered: Device[] = []
+    for (let i = 0; i < this.devices.length; i++) {
+      if (this.devices[i].room_id === roomId) {
+        filtered.push(this.devices[i])
+      }
+    }
+    return filtered
   }
 
   getStatusText(device: Device): string {
-    try {
-      const status: DeviceStatus = JSON.parse(device.status_json || '{}')
-      switch (device.type) {
-        case 'light':
-          return status.power === 'on' ? `开启 · 亮度${status.brightness}%` : '关闭'
-        case 'ac':
-          return status.power === 'on' ? `${status.mode} · ${status.temp}°C` : '关闭'
-        case 'door_lock':
-          return status.locked ? '已锁定' : '已解锁'
-        case 'temperature_sensor':
-          return `${status.value || '--'}°C`
-        case 'humidity_sensor':
-          return `${status.value || '--'}%`
-        case 'pir_sensor':
-          return status.presence ? '有人' : '无人'
-        default:
-          return '--'
-      }
-    } catch {
-      return '--'
+    let status = parseDeviceStatus(device.status_json)
+    switch (device.type) {
+      case 'light':
+        return status.power === 'on' ? `开启 · 亮度${status.brightness}%` : '关闭'
+      case 'ac':
+        return status.power === 'on' ? `${status.mode} · ${status.temp}°C` : '关闭'
+      case 'door_lock':
+        return status.locked ? '已锁定' : '已解锁'
+      case 'temperature_sensor':
+        return `${status.value}°C`
+      case 'humidity_sensor':
+        return `${status.value}%`
+      case 'pir_sensor':
+        return status.presence ? '有人' : '无人'
+      default:
+        return '--'
     }
   }
 
-  getDeviceIcon(device: Device): Resource {
+  getDeviceIcon(device: Device): string {
     switch (device.type) {
-      case 'light': return $r('sys.media.ohos_ic_public_light')
-      case 'ac': return $r('sys.media.ohos_ic_public_ac')
-      case 'door_lock': return $r('sys.media.ohos_ic_public_lock')
-      case 'temperature_sensor': return $r('sys.media.ohos_ic_public_temperature')
-      case 'humidity_sensor': return $r('sys.media.ohos_ic_public_humidity')
-      case 'pir_sensor': return $r('sys.media.ohos_ic_public_person')
-      default: return $r('sys.media.ohos_ic_public_device')
+      case 'light': return '\uD83D\uDCA1'
+      case 'ac': return '\u2744\uFE0F'
+      case 'door_lock': return '\uD83D\uDD12'
+      case 'temperature_sensor': return '\uD83C\uDF21\uFE0F'
+      case 'humidity_sensor': return '\uD83D\uDCA7'
+      case 'pir_sensor': return '\uD83D\uDEB6'
+      default: return '\uD83D\uDCF1'
     }
   }
 
   build() {
     Column() {
-      // 顶部栏
       Row() {
         Text('智能家居')
           .fontSize(20)
@@ -115,37 +171,42 @@ struct DashboardPage {
         colors: [['#1A3C6E', 0.0], ['#2B579A', 1.0]]
       })
 
-      // 房间切换 Tabs
       Row() {
         Scroll() {
           Row() {
-            this.RoomTab(0, '全部')
+            Column() {
+              this.RoomTab(0, '全部')
+            }
+            .margin({ right: 8 })
             ForEach(this.rooms, (room: Room) => {
-              this.RoomTab(room.id, room.name)
+              Column() {
+                this.RoomTab(room.id, room.name)
+              }
+              .margin({ right: 8 })
             })
           }
-          .space(8)
         }
         .scrollable(ScrollDirection.Horizontal)
         .width('100%')
       }
       .padding({ left: 16, right: 16, top: 12, bottom: 8 })
 
-      // 设备卡片列表
       Scroll() {
         Column() {
-          // 温湿度概览
-          if (this.sensorData['temperature'] || this.sensorData['humidity']) {
+          if (this.temperature !== '--' || this.humidity !== '--') {
             Row() {
-              this.SensorCard('温度', `${this.sensorData['temperature'] || '--'}°C`, '#FF9800')
-              this.SensorCard('湿度', `${this.sensorData['humidity'] || '--'}%`, '#2196F3')
+              Column() {
+                this.SensorCard('温度', `${this.temperature}°C`, '#FF9800')
+              }
+              .margin({ right: 12 })
+              Column() {
+                this.SensorCard('湿度', `${this.humidity}%`, '#2196F3')
+              }
             }
             .width('100%')
-            .space(12)
             .margin({ bottom: 12 })
           }
 
-          // 设备网格
           GridRow({ columns: 2, gutter: 12 }) {
             ForEach(this.getDevicesByRoom(this.currentRoom), (device: Device) => {
               GridCol() {
@@ -159,7 +220,6 @@ struct DashboardPage {
       .layoutWeight(1)
       .scrollBar(BarState.Off)
 
-      // 底部导航
       Row() {
         this.NavItem('总览', true)
         this.NavItem('照明', false, () => router.pushUrl({ url: 'pages/LightControlPage' }))
@@ -237,7 +297,6 @@ struct DashboardPage {
     .backgroundColor(Color.White)
     .shadow({ radius: 4, color: '#1A000000', offsetY: 2 })
     .onClick(() => {
-      // 根据设备类型跳转
       if (device.type === 'light') {
         router.pushUrl({ url: 'pages/LightControlPage' })
       } else if (device.type === 'ac') {

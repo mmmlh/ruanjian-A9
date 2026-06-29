@@ -17,6 +17,7 @@ MQTT_TLS_PORT = int(os.getenv("MQTT_TLS_PORT", "8883"))
 MQTT_USERNAME = os.getenv("MQTT_USERNAME", "")
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "")
 MQTT_USE_TLS = os.getenv("MQTT_USE_TLS", "false").lower() == "true"
+MQTT_CA_CERTS = os.getenv("MQTT_CA_CERTS", "")
 
 # ── JWT ──
 JWT_SECRET = os.getenv("JWT_SECRET", "smart-home-a9-secret-key-change-in-production")

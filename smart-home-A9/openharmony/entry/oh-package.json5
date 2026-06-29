@@ -1,7 +1,7 @@
 {
   "name": "entry",
   "version": "1.0.0",
-  "description": "Please describe the basic information.",
+  "description": "智能家居设备控制模块",
   "main": "Index.ets",
   "author": "",
   "license": "Apache-2.0",

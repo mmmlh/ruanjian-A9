@@ -17,6 +17,7 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
+.pytest_cache/
 
 # ── 数据 / 运行时 ──
 *.db
