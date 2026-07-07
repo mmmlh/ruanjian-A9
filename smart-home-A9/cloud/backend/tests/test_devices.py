@@ -71,3 +71,24 @@ class TestDevices:
             "action": "on",
         }, headers=auth_headers)
         assert r.status_code == 404
+    def test_bind_device_response_contains_room_name_and_status_summary(self, client, auth_headers, db, monkeypatch):
+        from app.api import discovery as discovery_api
+
+        monkeypatch.setattr(discovery_api, "ROOMS", ["livingroom", "bedroom", "study"])
+        candidate = client.post("/api/discovery", headers=auth_headers).json()["discovered"][0]
+
+        response = client.post(
+            "/api/bind_device",
+            json={"device_id": candidate["id"], "room_id": 1, "name": "Guest Lamp"},
+            headers=auth_headers,
+        )
+
+        try:
+            assert response.status_code == 200
+            payload = response.json()
+            assert isinstance(payload["device"]["room_name"], str)
+            assert payload["device"]["room_name"].strip()
+            assert payload["device"]["status_summary"]
+        finally:
+            db.execute("DELETE FROM devices WHERE mqtt_topic = ?", (candidate["mqtt_topic"],))
+            db.commit()
