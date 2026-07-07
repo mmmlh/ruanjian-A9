@@ -2,6 +2,7 @@
 设备管理 API 测试
 """
 from datetime import datetime
+import json
 import pytest
 
 
@@ -29,6 +30,28 @@ class TestDevices:
         parsed = datetime.fromisoformat(device["last_seen_at"].replace("Z", "+00:00"))
         assert parsed.tzinfo is not None
 
+    def test_device_detail_returns_null_last_seen_for_missing_timestamp(self, client, auth_headers, db):
+        db.execute("UPDATE devices SET updated_at = NULL, created_at = NULL WHERE id = 4")
+        db.commit()
+
+        r = client.get("/api/devices/4", headers=auth_headers)
+
+        assert r.status_code == 200
+        data = r.json()
+        assert data["online"] is False
+        assert data["last_seen_at"] is None
+
+    def test_device_detail_returns_null_last_seen_for_invalid_timestamp(self, client, auth_headers, db):
+        db.execute("UPDATE devices SET updated_at = ? WHERE id = 4", ("not-a-date",))
+        db.commit()
+
+        r = client.get("/api/devices/4", headers=auth_headers)
+
+        assert r.status_code == 200
+        data = r.json()
+        assert data["online"] is False
+        assert data["last_seen_at"] is None
+
     def test_filter_by_room(self, client, auth_headers):
         r = client.get("/api/devices?room_id=1", headers=auth_headers)
         assert r.status_code == 200
@@ -55,6 +78,28 @@ class TestDevices:
         assert "online" in data
         assert data["status_summary"]
         assert "last_seen_at" in data
+
+    def test_device_detail_tolerates_invalid_status_json(self, client, auth_headers, db):
+        db.execute("UPDATE devices SET status_json = ? WHERE id = 4", ("{bad",))
+        db.commit()
+
+        r = client.get("/api/devices/4", headers=auth_headers)
+
+        assert r.status_code == 200
+        data = r.json()
+        assert data["status"] == {}
+        assert data["status_summary"] == "Power off"
+
+    def test_device_detail_tolerates_non_mapping_status_json(self, client, auth_headers, db):
+        db.execute("UPDATE devices SET status_json = ? WHERE id = 4", ('["unexpected"]',))
+        db.commit()
+
+        r = client.get("/api/devices/4", headers=auth_headers)
+
+        assert r.status_code == 200
+        data = r.json()
+        assert data["status"] == {}
+        assert data["status_summary"] == "Power off"
 
     def test_get_device_not_found(self, client, auth_headers):
         r = client.get("/api/devices/999", headers=auth_headers)
@@ -115,3 +160,28 @@ class TestDevices:
         finally:
             db.execute("DELETE FROM devices WHERE mqtt_topic = ?", (candidate["mqtt_topic"],))
             db.commit()
+    def test_state_read_tolerates_bad_numeric_status_values(self, client, auth_headers, db):
+        db.execute("UPDATE devices SET status_json = ? WHERE id = 15", ('{"position":"bad"}',))
+        db.commit()
+
+        r = client.get("/api/states/curtain.device_15", headers=auth_headers)
+
+        assert r.status_code == 200
+        data = r.json()
+        assert data["state"] == "unknown"
+        assert data["attributes"]["status_summary"] == "Unknown position"
+
+    def test_state_write_ignores_derived_presentation_attributes(self, client, auth_headers, db):
+        r = client.post(
+            "/api/states/light.device_4",
+            json={
+                "attributes": {
+                    "brightness": 42,
+                    "online": True,
+                    "status_summary": "forged",
+                }
+            },
+            headers=auth_headers,
+        )
+
+        assert r.status_code == 200

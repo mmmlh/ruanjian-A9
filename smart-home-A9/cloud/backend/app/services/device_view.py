@@ -4,6 +4,7 @@ Shared device presentation helpers for API payloads and state attributes.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping as MappingABC
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
 
@@ -28,11 +29,10 @@ def parse_updated_at(value: str | None) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
-def format_last_seen_at(value: str | None, now: datetime | None = None) -> str:
+def format_last_seen_at(value: str | None, now: datetime | None = None) -> str | None:
     parsed = parse_updated_at(value)
-    current = now or datetime.now(timezone.utc)
     if parsed is None:
-        return current.isoformat()
+        return None
     return parsed.astimezone(timezone.utc).isoformat()
 
 
@@ -46,16 +46,30 @@ def is_device_online(value: str | None, now: datetime | None = None) -> bool:
         current = current.replace(tzinfo=timezone.utc)
     else:
         current = current.astimezone(timezone.utc)
-    return current - seen_at <= ONLINE_FRESHNESS_WINDOW
+    age = current - seen_at
+    return timedelta(0) <= age <= ONLINE_FRESHNESS_WINDOW
 
 
 def load_device_status(device: Mapping[str, Any]) -> dict[str, Any]:
-    if isinstance(device.get("status"), dict):
-        return dict(device["status"])
+    raw_status = device.get("status")
+    if raw_status is not None:
+        if isinstance(raw_status, MappingABC):
+            return dict(raw_status)
+        return {}
     try:
-        return json.loads(device.get("status_json") or "{}")
+        parsed = json.loads(device.get("status_json") or "{}")
     except (TypeError, json.JSONDecodeError):
         return {}
+    if isinstance(parsed, MappingABC):
+        return dict(parsed)
+    return {}
+
+
+def _safe_int(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def summarize_device_status(device_type: str, status: Mapping[str, Any]) -> str:
@@ -77,10 +91,12 @@ def summarize_device_status(device_type: str, status: Mapping[str, Any]) -> str:
     if device_type == "pir_sensor":
         return "Motion detected" if status.get("presence") else "No motion"
     if device_type == "curtain":
-        return f"Open {int(status.get('position', 0))}%"
+        position = _safe_int(status.get("position"))
+        return f"Open {position}%" if position is not None else "Unknown position"
     if device_type == "humidifier":
         if status.get("power") == "on":
-            return f"Target humidity {int(status.get('target_humidity', 60))}%"
+            target_humidity = _safe_int(status.get("target_humidity"))
+            return f"Target humidity {target_humidity}%" if target_humidity is not None else "Unknown target humidity"
         return "Power off"
     return json.dumps(status, ensure_ascii=False)
 

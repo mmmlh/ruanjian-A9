@@ -138,3 +138,22 @@ class TestDashboardContract:
 
         parsed = datetime.fromisoformat(devices[0]["last_seen_at"].replace("Z", "+00:00"))
         assert parsed.tzinfo is not None
+
+    def test_dashboard_summary_excludes_future_timestamps_from_online_counts(self, client, auth_headers, db):
+        stale = "2000-01-01 00:00:00"
+        future = "2999-01-01 00:00:00"
+        fresh = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        db.execute("UPDATE devices SET updated_at = ?", (stale,))
+        db.execute("UPDATE devices SET updated_at = ? WHERE id = 4", (future,))
+        db.execute("UPDATE devices SET updated_at = ? WHERE id = 5", (fresh,))
+        db.commit()
+
+        response = client.get("/api/dashboard/summary", headers=auth_headers)
+
+        assert response.status_code == 200
+        payload = response.json()
+        devices = {device["id"]: device for device in payload["devices"]}
+        assert devices[4]["online"] is False
+        assert devices[5]["online"] is True
+        assert payload["stats"]["online_devices"] == 1
+        assert payload["stats"]["offline_devices"] == len(devices) - 1

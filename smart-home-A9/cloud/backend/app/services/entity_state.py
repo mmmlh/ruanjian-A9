@@ -8,7 +8,16 @@ META_ATTRIBUTE_KEYS = {
     "room_name",
     "mqtt_topic",
     "brand",
+    "online",
+    "status_summary",
 }
+
+
+def _safe_int(value) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def parse_entity_id(entity_id: str) -> tuple[str, int] | None:
@@ -37,7 +46,9 @@ def derive_state(device_type: str, status: dict) -> str:
     if device_type == "pir_sensor":
         return "on" if status.get("presence") else "off"
     if device_type == "curtain":
-        position = int(status.get("position", 0))
+        position = _safe_int(status.get("position"))
+        if position is None:
+            return "unknown"
         if position == 0:
             return "closed"
         if position >= 100:
