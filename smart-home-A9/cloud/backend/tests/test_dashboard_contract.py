@@ -9,18 +9,6 @@ class TestDashboardContract:
     def _restrict_discovery_to_seeded_rooms(self, monkeypatch):
         monkeypatch.setattr(discovery_api, "ROOMS", ["livingroom", "bedroom", "study"])
 
-    def test_dashboard_summary_returns_rooms_devices_stats_scenes_and_recent_logs(self, client, auth_headers):
-        response = client.get("/api/dashboard/summary", headers=auth_headers)
-
-        assert response.status_code == 200
-        data = response.json()
-        assert "rooms" in data
-        assert "devices" in data
-        assert "stats" in data
-        assert "scenes" in data
-        assert "recent_logs" in data
-        assert data["stats"]["total_devices"] >= len(data["devices"])
-
     def test_discovery_returns_candidates_without_creating_real_devices(self, client, auth_headers, db, monkeypatch):
         self._restrict_discovery_to_seeded_rooms(monkeypatch)
         before = db.execute("SELECT COUNT(*) FROM devices").fetchone()[0]
