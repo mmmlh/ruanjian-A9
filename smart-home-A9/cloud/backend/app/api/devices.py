@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional, Any
 
+from app.services.device_view import present_device
 from app.database.connection import get_db
 from app.api.auth import get_current_user
 
@@ -37,7 +38,7 @@ def list_devices(room_id: Optional[int] = None, type: Optional[str] = None,
     query += " ORDER BY d.id"
     with get_db() as conn:
         rows = conn.execute(query, params).fetchall()
-    return [dict(r) for r in rows]
+    return [present_device(dict(row)) for row in rows]
 
 
 @router.get("/{device_id}")
@@ -50,9 +51,7 @@ def get_device(device_id: int, user: dict = Depends(get_current_user)):
         ).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="设备不存在")
-    result = dict(row)
-    result["status"] = json.loads(result.get("status_json") or "{}")
-    return result
+    return present_device(dict(row), include_status=True)
 
 
 @router.put("/{device_id}")

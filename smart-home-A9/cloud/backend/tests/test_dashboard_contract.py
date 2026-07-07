@@ -107,3 +107,34 @@ class TestDashboardContract:
         finally:
             db.execute("DELETE FROM devices WHERE name = ?", ("Duplicate Guard",))
             db.commit()
+
+    def test_dashboard_summary_devices_include_presentation_fields_and_stats_match_online_flags(
+        self,
+        client,
+        auth_headers,
+        db,
+    ):
+        stale = "2000-01-01 00:00:00"
+        fresh = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        db.execute("UPDATE devices SET updated_at = ?", (stale,))
+        db.execute("UPDATE devices SET updated_at = ? WHERE id IN (4, 5)", (fresh,))
+        db.commit()
+
+        response = client.get("/api/dashboard/summary", headers=auth_headers)
+
+        assert response.status_code == 200
+        payload = response.json()
+        devices = payload["devices"]
+        assert devices
+        assert all("online" in device for device in devices)
+        assert all("status_summary" in device for device in devices)
+        assert all("last_seen_at" in device for device in devices)
+        assert all(isinstance(device["status_summary"], str) and device["status_summary"].strip() for device in devices)
+
+        online_ids = {device["id"] for device in devices if device["online"]}
+        assert online_ids == {4, 5}
+        assert payload["stats"]["online_devices"] == len(online_ids)
+        assert payload["stats"]["offline_devices"] == len(devices) - len(online_ids)
+
+        parsed = datetime.fromisoformat(devices[0]["last_seen_at"].replace("Z", "+00:00"))
+        assert parsed.tzinfo is not None

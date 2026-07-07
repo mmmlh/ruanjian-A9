@@ -1,6 +1,7 @@
 """
 设备管理 API 测试
 """
+from datetime import datetime
 import pytest
 
 
@@ -12,6 +13,21 @@ class TestDevices:
         assert r.status_code == 200
         data = r.json()
         assert len(data) == 11  # 6 客厅 + 5 卧室
+
+    def test_list_devices_include_presentation_fields(self, client, auth_headers, db):
+        db.execute("UPDATE devices SET updated_at = ? WHERE id = 4", ("2000-01-01 00:00:00",))
+        db.commit()
+
+        response = client.get("/api/devices", headers=auth_headers)
+
+        assert response.status_code == 200
+        data = response.json()
+        device = next(item for item in data if item["id"] == 4)
+        assert device["online"] is False
+        assert isinstance(device["status_summary"], str)
+        assert device["status_summary"].strip()
+        parsed = datetime.fromisoformat(device["last_seen_at"].replace("Z", "+00:00"))
+        assert parsed.tzinfo is not None
 
     def test_filter_by_room(self, client, auth_headers):
         r = client.get("/api/devices?room_id=1", headers=auth_headers)
@@ -36,6 +52,9 @@ class TestDevices:
         assert data["type"] == "light"
         assert data["name"] == "客厅主灯"
         assert "status_json" in data
+        assert "online" in data
+        assert data["status_summary"]
+        assert "last_seen_at" in data
 
     def test_get_device_not_found(self, client, auth_headers):
         r = client.get("/api/devices/999", headers=auth_headers)
