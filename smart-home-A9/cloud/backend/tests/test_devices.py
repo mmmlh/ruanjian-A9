@@ -89,6 +89,10 @@ class TestDevices:
             assert isinstance(payload["device"]["room_name"], str)
             assert payload["device"]["room_name"].strip()
             assert payload["device"]["status_summary"]
+            assert "T" in payload["device"]["last_seen_at"]
+            assert payload["device"]["last_seen_at"].endswith("+00:00")
+            parsed = datetime.fromisoformat(payload["device"]["last_seen_at"].replace("Z", "+00:00"))
+            assert parsed.tzinfo is not None
         finally:
             db.execute("DELETE FROM devices WHERE mqtt_topic = ?", (candidate["mqtt_topic"],))
             db.commit()

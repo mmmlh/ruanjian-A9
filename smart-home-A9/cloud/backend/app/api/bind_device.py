@@ -12,6 +12,7 @@ from app.database.connection import get_connection
 from app.services.discovery_catalog import (
     CandidateAlreadyBoundError,
     CandidateNotFoundError,
+    canonical_last_seen_at,
     create_bound_device,
     summarize_candidate_status,
 )
@@ -64,7 +65,9 @@ def bind_device(req: BindDeviceRequest, user: dict = Depends(get_current_user)):
         device["type"],
         device.get("status", {}),
     )
-    device["last_seen_at"] = device.get("updated_at") or device.get("created_at")
+    device["last_seen_at"] = canonical_last_seen_at(
+        device.get("updated_at") or device.get("created_at")
+    )
 
     return {
         "success": True,

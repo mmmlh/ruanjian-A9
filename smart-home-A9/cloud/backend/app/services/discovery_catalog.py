@@ -82,13 +82,31 @@ def summarize_candidate_status(device_type: str, status: dict[str, Any]) -> str:
     return json.dumps(status, ensure_ascii=False)
 
 
+def canonical_last_seen_at(value: str | None = None) -> str:
+    if not value:
+        return datetime.now(timezone.utc).isoformat()
+
+    normalized = value.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        parsed = datetime.strptime(value, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+    else:
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        else:
+            parsed = parsed.astimezone(timezone.utc)
+
+    return parsed.isoformat()
+
+
 def normalize_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(candidate)
     normalized["status_summary"] = summarize_candidate_status(
         normalized["type"],
         normalized.get("status", {}),
     )
-    normalized["last_seen_at"] = datetime.now(timezone.utc).isoformat()
+    normalized["last_seen_at"] = canonical_last_seen_at(normalized.get("last_seen_at"))
     return normalized
 
 

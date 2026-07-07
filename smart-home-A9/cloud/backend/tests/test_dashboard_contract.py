@@ -1,6 +1,7 @@
 """
 Dashboard and discovery contract tests for the real-functionality plan.
 """
+from datetime import datetime
 
 from app.api import discovery as discovery_api
 
@@ -11,25 +12,28 @@ class TestDashboardContract:
 
     def test_discovery_returns_candidates_without_creating_real_devices(self, client, auth_headers, db, monkeypatch):
         self._restrict_discovery_to_seeded_rooms(monkeypatch)
-        before = db.execute("SELECT COUNT(*) FROM devices").fetchone()[0]
+        before = [
+            (row["id"], row["mqtt_topic"], row["status_json"])
+            for row in db.execute(
+                "SELECT id, mqtt_topic, status_json FROM devices ORDER BY id"
+            ).fetchall()
+        ]
 
         response = client.post("/api/discovery", headers=auth_headers)
 
         assert response.status_code == 200
         payload = response.json()
-        discovered_ids = [item["id"] for item in payload.get("discovered", []) if isinstance(item.get("id"), int)]
-        after = db.execute("SELECT COUNT(*) FROM devices").fetchone()[0]
+        after = [
+            (row["id"], row["mqtt_topic"], row["status_json"])
+            for row in db.execute(
+                "SELECT id, mqtt_topic, status_json FROM devices ORDER BY id"
+            ).fetchall()
+        ]
 
-        try:
-            assert "discovered" in payload
-            assert isinstance(payload["discovered"], list)
-            assert payload["mutates_devices"] is False
-            assert after == before
-        finally:
-            if discovered_ids:
-                placeholders = ",".join("?" for _ in discovered_ids)
-                db.execute(f"DELETE FROM devices WHERE id IN ({placeholders})", discovered_ids)
-                db.commit()
+        assert "discovered" in payload
+        assert isinstance(payload["discovered"], list)
+        assert payload["mutates_devices"] is False
+        assert after == before
 
     def test_discovery_returns_candidate_status_summary_and_last_seen(self, client, auth_headers, monkeypatch):
         self._restrict_discovery_to_seeded_rooms(monkeypatch)
@@ -46,13 +50,14 @@ class TestDashboardContract:
         assert "last_seen_at" in candidate
         assert isinstance(candidate["status_summary"], str)
         assert candidate["status_summary"].strip()
+        parsed = datetime.fromisoformat(candidate["last_seen_at"].replace("Z", "+00:00"))
+        assert parsed.tzinfo is not None
 
     def test_bind_device_creates_bound_device_from_candidate(self, client, auth_headers, db, monkeypatch):
         self._restrict_discovery_to_seeded_rooms(monkeypatch)
         discovery = client.post("/api/discovery", headers=auth_headers)
         assert discovery.status_code == 200
         discovered = discovery.json()["discovered"]
-        discovered_ids = [item["id"] for item in discovered if isinstance(item.get("id"), int)]
         candidate = discovered[0]
         after_discovery = db.execute("SELECT COUNT(*) FROM devices").fetchone()[0]
 
@@ -70,12 +75,14 @@ class TestDashboardContract:
             assert payload["success"] is True
             assert payload["device"]["room_id"] == 1
             assert payload["device"]["name"] == "Guest Lamp"
+            assert "T" in payload["device"]["last_seen_at"]
+            assert payload["device"]["last_seen_at"].endswith("+00:00")
+            parsed = datetime.fromisoformat(payload["device"]["last_seen_at"].replace("Z", "+00:00"))
+            assert parsed.tzinfo is not None
             assert after == after_discovery + 1
         finally:
-            if discovered_ids:
-                placeholders = ",".join("?" for _ in discovered_ids)
-                db.execute(f"DELETE FROM devices WHERE id IN ({placeholders})", discovered_ids)
-                db.commit()
+            db.execute("DELETE FROM devices WHERE mqtt_topic = ?", (candidate["mqtt_topic"],))
+            db.commit()
 
     def test_bind_device_rejects_duplicate_binding(self, client, auth_headers, db, monkeypatch):
         self._restrict_discovery_to_seeded_rooms(monkeypatch)
