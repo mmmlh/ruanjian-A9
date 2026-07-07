@@ -1,6 +1,8 @@
 # ── Node / OpenHarmony ──
 node_modules/
 .idea/
+.appanalyzer/
+.deveco/
 *.log
 build/
 .cxx/
@@ -42,3 +44,4 @@ Thumbs.db
 
 # ── Claude Code 本地配置 ──
 .claude/
+.worktrees/
