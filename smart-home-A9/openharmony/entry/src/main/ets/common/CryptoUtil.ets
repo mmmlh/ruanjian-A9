@@ -1,24 +1,32 @@
 import cryptoFramework from '@ohos.security.cryptoFramework'
-import { util } from '@kit.ArkTS'
+import util from '@ohos.util'
 
 const AES_BLOCK_SIZE = 16
 const AES_KEY_SIZE = 32
 
 async function generateRandom(length: number): Promise<Uint8Array> {
-  let rand = cryptoFramework.createRandom()
-  let blob = await rand.generateRandom(length)
-  return new Uint8Array(blob.data)
+  try {
+    let rand = cryptoFramework.createRandom()
+    let blob = await rand.generateRandom(length)
+    return new Uint8Array(blob.data)
+  } catch (e) {
+    return new Uint8Array(length)
+  }
 }
 
 async function createSymKey(keyBase64: string): Promise<cryptoFramework.SymKey> {
-  let helper = new util.Base64Helper()
-  let keyBytes = helper.decodeSync(keyBase64)
-  let keyData = new Uint8Array(AES_KEY_SIZE)
-  keyData.set(keyBytes.slice(0, AES_KEY_SIZE))
-  let keyGenerator = cryptoFramework.createSymKeyGenerator('AES256')
-  let keyBlob: cryptoFramework.DataBlob = { data: keyData }
-  let symKey = await keyGenerator.convertKey(keyBlob)
-  return symKey
+  try {
+    let helper = new util.Base64Helper()
+    let keyBytes = helper.decodeSync(keyBase64)
+    let keyData = new Uint8Array(AES_KEY_SIZE)
+    keyData.set(keyBytes.slice(0, AES_KEY_SIZE))
+    let keyGenerator = cryptoFramework.createSymKeyGenerator('AES256')
+    let keyBlob: cryptoFramework.DataBlob = { data: keyData }
+    let symKey = await keyGenerator.convertKey(keyBlob)
+    return symKey
+  } catch (err) {
+    throw new Error('sym_key_generation_failed')
+  }
 }
 
 export async function aesEncrypt(plaintext: string, keyBase64: string): Promise<string> {

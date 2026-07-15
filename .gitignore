@@ -45,3 +45,12 @@ Thumbs.db
 # ── Claude Code 本地配置 ──
 .claude/
 .worktrees/
+
+# --- Local build toolchains and generated previews ---
+/smart-home-A9/.superpowers/
+/smart-home-A9/hvigor/
+/smart-home-A9/hvigor-ohos-plugin/
+/smart-home-A9/openharmony/.sdk-proxy/
+/smart-home-A9/output/
+/smart-home-A9/tmp/
+/smart-home-A9/docs/test-reports/

@@ -1,13 +1,28 @@
 {
   "app": {
-    "signingConfigs": [],
+    "signingConfigs": [
+      {
+        "name": "default",
+        "type": "OpenHarmony",
+        "material": {
+          "certpath": "C:/Users/21302/.ohos/config/default_openharmony_XziaW5TSX_rnWVZn7f0-WyvO3Pfp9o7Bj5GERSs0Pm4=.cer",
+          "keyAlias": "debugKey",
+          "keyPassword": "0000001B1F71E36C239C7BF61F85C585E8E713E0026980C3543B42B3BBE4C561CE7CC38E13A0147A3A9573",
+          "profile": "C:/Users/21302/.ohos/config/default_openharmony_XziaW5TSX_rnWVZn7f0-WyvO3Pfp9o7Bj5GERSs0Pm4=.p7b",
+          "signAlg": "SHA256withECDSA",
+          "storeFile": "C:/Users/21302/.ohos/config/default_openharmony_XziaW5TSX_rnWVZn7f0-WyvO3Pfp9o7Bj5GERSs0Pm4=.p12",
+          "storePassword": "0000001B6606C60D700F546BB1ECAC9EC79145E70F9799855A5C0FED9C825910EB68CA333ECBA4B0C6B140"
+        }
+      }
+    ],
     "products": [
       {
         "name": "default",
         "signingConfig": "default",
-        "targetSdkVersion": "6.0.2(22)",
-        "compatibleSdkVersion": "6.0.2(22)",
-        "runtimeOS": "HarmonyOS",
+        "compileSdkVersion": 20,
+        "targetSdkVersion": 20,
+        "compatibleSdkVersion": 20,
+        "runtimeOS": "OpenHarmony",
         "buildOption": {
           "strictMode": {
             "caseSensitiveCheck": true,
@@ -32,7 +47,9 @@
       "targets": [
         {
           "name": "default",
-          "applyToProducts": ["default"]
+          "applyToProducts": [
+            "default"
+          ]
         }
       ]
     }

@@ -72,5 +72,5 @@ def bind_device(req: BindDeviceRequest, user: dict = Depends(get_current_user)):
     return {
         "success": True,
         "device": device,
-        "message": f"Device '{device['name']}' bound to '{room['name']}'",
+        "message": f"设备“{device['name']}”已绑定到“{room['name']}”",
     }

@@ -1,5 +1,5 @@
-import { webSocket } from '@kit.NetworkKit'
-import { BusinessError } from '@kit.BasicServicesKit'
+import { BusinessError } from '@ohos.base'
+import webSocket from '@ohos.net.webSocket'
 import { getBaseUrl, getToken } from './ApiClient'
 
 let ws: webSocket.WebSocket | null = null
@@ -19,8 +19,10 @@ function _doConnect(): void {
   isConnecting = true
 
   let token = getToken()
-  let baseUrl = getBaseUrl().replace('http://', 'ws://')
-  let url = `${baseUrl}/ws/realtime?token=${token}`
+  let base = getBaseUrl()
+  let wsProtocol = base.startsWith('https') ? 'wss://' : 'ws://'
+  let host = base.replace('https://', '').replace('http://', '')
+  let url = `${wsProtocol}${host}/ws/realtime?token=${token}`
 
   ws = webSocket.createWebSocket()
   ws!.on('open', () => {
@@ -78,7 +80,11 @@ export function disconnectWS(): void {
     reconnectTimer = -1
   }
   if (ws) {
-    ws.close()
+    try {
+      ws.close()
+    } catch (e) {
+      console.error('WebSocket close error', e)
+    }
     ws = null
   }
   messageCallback = null

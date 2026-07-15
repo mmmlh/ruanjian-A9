@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Any, Iterable
 
 from app.database.connection import get_db
+from app.services.device_view import summarize_device_status
 
 
 _DEFAULT_STATUS_BY_TYPE: dict[str, dict[str, Any]] = {
@@ -27,27 +28,27 @@ _BASE_CANDIDATES: list[dict[str, Any]] = [
     {
         "id": "candidate-livingroom-ambient-light",
         "room": "livingroom",
-        "room_hint": "Living Room",
+        "room_hint": "客厅",
         "type": "light",
-        "name": "Living Room Accent Light",
+        "name": "客厅氛围灯",
         "brand": "",
         "mqtt_topic": "home/livingroom/light_extra",
     },
     {
         "id": "candidate-bedroom-humidifier",
         "room": "bedroom",
-        "room_hint": "Bedroom",
+        "room_hint": "卧室",
         "type": "humidifier",
-        "name": "Bedroom Backup Humidifier",
+        "name": "卧室备用加湿器",
         "brand": "",
         "mqtt_topic": "home/bedroom/humidifier_extra",
     },
     {
         "id": "candidate-study-curtain",
         "room": "study",
-        "room_hint": "Study",
+        "room_hint": "书房",
         "type": "curtain",
-        "name": "Study Curtain Extension",
+        "name": "书房窗帘扩展",
         "brand": "",
         "mqtt_topic": "home/study/curtain_extra",
     },
@@ -67,19 +68,7 @@ def _status_for_type(device_type: str) -> dict[str, Any]:
 
 
 def summarize_candidate_status(device_type: str, status: dict[str, Any]) -> str:
-    if device_type == "light":
-        return "Power on" if status.get("power") == "on" else "Power off"
-    if device_type == "ac":
-        if status.get("power") == "on":
-            return f"{status.get('mode', 'cool')} {status.get('temp', 26)}C"
-        return "Standby"
-    if device_type == "door_lock":
-        return "Locked" if status.get("locked", True) else "Unlocked"
-    if device_type == "curtain":
-        return f"Open {int(status.get('position', 0))}%"
-    if device_type == "humidifier":
-        return f"Target humidity {int(status.get('target_humidity', 60))}%"
-    return json.dumps(status, ensure_ascii=False)
+    return summarize_device_status(device_type, status)
 
 
 def canonical_last_seen_at(value: str | None = None) -> str:

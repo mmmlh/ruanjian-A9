@@ -12,6 +12,7 @@ set DIRNAME=%~dp0
 if "%DIRNAME%" == "" set DIRNAME=.
 set APP_BASE_NAME=%~n0
 set APP_HOME=%DIRNAME%
+set DEVECO_JAVA_HOME=D:\d s\DevEco Studio\jbr
 
 @rem Resolve any "." and ".." in APP_HOME to make it shorter.
 for %%i in ("%APP_HOME%") do set APP_HOME=%%~fi
@@ -24,6 +25,11 @@ goto start
 
 :start
 if not defined NODE_OPTS set NODE_OPTS="--"
+
+@rem Fall back to the DevEco bundled JBR when java is unavailable in PATH.
+where java >NUL 2>&1
+if "%ERRORLEVEL%" NEQ "0" if not defined JAVA_HOME if exist "%DEVECO_JAVA_HOME%\bin\java.exe" set JAVA_HOME=%DEVECO_JAVA_HOME%
+if defined JAVA_HOME set PATH=%JAVA_HOME%\bin;%PATH%
 
 @rem Find node.exe
 if defined NODE_HOME goto findNodeFromNodeHome

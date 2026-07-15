@@ -11,6 +11,14 @@
     {
       "name": "EntryAbility_label",
       "value": "智能家居"
+    },
+    {
+      "name": "EntryFormAbility_label",
+      "value": "智能家居卡片"
+    },
+    {
+      "name": "EntryFormAbility_desc",
+      "value": "智能家居设备状态桌面卡片"
     }
   ]
 }

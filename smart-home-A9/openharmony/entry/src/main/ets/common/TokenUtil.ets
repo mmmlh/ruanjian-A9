@@ -1,4 +1,4 @@
-import { util } from '@kit.ArkTS'
+import util from '@ohos.util'
 
 function decodeBase64Url(str: string): string {
   let base64 = str.replace(/-/g, '+').replace(/_/g, '/')
@@ -11,8 +11,8 @@ function decodeBase64Url(str: string): string {
   try {
     let helper = new util.Base64Helper()
     let decoded = helper.decodeSync(base64)
-    let textDecoder = util.TextDecoder.create('utf-8', { ignoreBOM: true })
-    let result = textDecoder.decodeWithStream(decoded, { stream: false })
+    let textDecoder = util.TextDecoder.create('utf-8')
+    let result = textDecoder.decodeToString(decoded)
     return result
   } catch (e) {
     return '{}'

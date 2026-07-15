@@ -31,6 +31,16 @@ class TestRules:
         }, headers=auth_headers)
         assert r.status_code == 200
 
+    def test_update_rule_rejects_missing_name(self, client, auth_headers):
+        response = client.put(
+            "/api/rules/1",
+            json={"name": "   "},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "rule_name_required"
+
     def test_toggle_rule(self, client, auth_headers):
         # 先获取当前状态
         r = client.get("/api/rules", headers=auth_headers)
@@ -54,3 +64,82 @@ class TestRules:
     def test_delete_nonexistent(self, client, auth_headers):
         r = client.delete("/api/rules/999", headers=auth_headers)
         assert r.status_code == 404
+
+    def test_rule_options_endpoint_returns_supported_triggers_and_targets(self, client, auth_headers):
+        r = client.get("/api/rules/options", headers=auth_headers)
+        assert r.status_code == 200
+        payload = r.json()
+        assert "triggers" in payload
+        assert "targets" in payload
+        assert any(item["value"] == "temperature_sensor" for item in payload["triggers"])
+
+    def test_rule_options_return_labels_actions_and_room_names(self, client, auth_headers):
+        response = client.get("/api/rules/options", headers=auth_headers)
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["triggers"]
+        assert payload["targets"]
+        assert payload["operators"]
+        assert all("label" in item for item in payload["triggers"])
+        assert all(item.get("room_name") for item in payload["triggers"])
+        assert all("actions" in item for item in payload["targets"])
+        assert all(item.get("room_name") for item in payload["targets"])
+        assert payload["operators"] == [
+            {"label": "等于", "value": "eq"},
+            {"label": "不等于", "value": "neq"},
+            {"label": "大于", "value": "gt"},
+            {"label": "大于等于", "value": "gte"},
+            {"label": "小于", "value": "lt"},
+            {"label": "小于等于", "value": "lte"},
+        ]
+
+    def test_create_rule_rejects_missing_name(self, client, auth_headers):
+        response = client.post(
+            "/api/rules",
+            json={"name": "   ", "condition_json": "{}", "action_json": "[]", "enabled": 1},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "rule_name_required"
+
+    def test_create_rule_rejects_invalid_condition_json(self, client, auth_headers):
+        response = client.post(
+            "/api/rules",
+            json={
+                "name": "invalid condition",
+                "condition_json": '{"trigger":"pir_sensor","field":"presence"',
+                "action_json": '[{"device_type":"light","action":"on","params":{}}]',
+                "enabled": 1,
+            },
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "invalid_condition_json"
+
+    def test_create_rule_rejects_invalid_action_json(self, client, auth_headers):
+        response = client.post(
+            "/api/rules",
+            json={
+                "name": "invalid action",
+                "condition_json": '{"trigger":"pir_sensor","field":"presence","operator":"eq","value":true}',
+                "action_json": '{"device_type":"light","action":"on"}',
+                "enabled": 1,
+            },
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "invalid_action_json"
+
+    def test_update_rule_rejects_invalid_action_json(self, client, auth_headers):
+        response = client.put(
+            "/api/rules/1",
+            json={"action_json": '{"device_type":"light","action":"on"}'},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "invalid_action_json"

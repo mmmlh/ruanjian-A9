@@ -12,6 +12,8 @@ from pir_sensor import PIRSensor
 from light_controller import LightController
 from ac_controller import ACController
 from door_lock import DoorLock
+from curtain_controller import CurtainController
+from humidifier_controller import HumidifierController
 
 logging.basicConfig(
     level=logging.INFO,
@@ -41,6 +43,18 @@ def create_devices() -> list:
     devices.append(PIRSensor(9, "bedroom", mqtt_broker=MQTT_BROKER, mqtt_port=MQTT_PORT))
     devices.append(LightController(10, "bedroom", mqtt_broker=MQTT_BROKER, mqtt_port=MQTT_PORT))
     devices.append(ACController(11, "bedroom", brand="haier", mqtt_broker=MQTT_BROKER, mqtt_port=MQTT_PORT))
+
+    # ── 书房 ──
+    devices.append(TemperatureSensor(12, "study", mqtt_broker=MQTT_BROKER, mqtt_port=MQTT_PORT))
+    devices.append(LightController(13, "study", mqtt_broker=MQTT_BROKER, mqtt_port=MQTT_PORT))
+    devices.append(ACController(14, "study", brand="midea", mqtt_broker=MQTT_BROKER, mqtt_port=MQTT_PORT))
+
+    # ── 扩展设备：窗帘 ──
+    devices.append(CurtainController(15, "livingroom", mqtt_broker=MQTT_BROKER, mqtt_port=MQTT_PORT))
+    devices.append(CurtainController(16, "study", mqtt_broker=MQTT_BROKER, mqtt_port=MQTT_PORT))
+
+    # ── 扩展设备：加湿器 ──
+    devices.append(HumidifierController(17, "bedroom", mqtt_broker=MQTT_BROKER, mqtt_port=MQTT_PORT))
 
     return devices
 

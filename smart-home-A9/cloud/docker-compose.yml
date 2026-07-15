@@ -22,7 +22,8 @@ services:
       - DATABASE_URL=sqlite:///data/smart_home.db
       - MQTT_BROKER=mqtt
       - MQTT_PORT=1883
-      - MQTT_USE_TLS=true
+      # Local simulator integration uses the internal plain-MQTT listener.
+      - MQTT_USE_TLS=false
       - MQTT_TLS_PORT=8883
       - MQTT_CA_CERTS=/certs/server.crt
       - JWT_SECRET=${JWT_SECRET:-smart-home-a9-secret}

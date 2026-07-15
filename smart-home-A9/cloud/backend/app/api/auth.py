@@ -92,3 +92,29 @@ def get_me(user: dict = Depends(get_current_user)):
     if row is None:
         raise HTTPException(status_code=404, detail="用户不存在")
     return dict(row)
+
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str
+
+
+@router.put("/change-password")
+def change_password(req: ChangePasswordRequest, user: dict = Depends(get_current_user)):
+    """修改密码"""
+    if len(req.new_password) < 6:
+        raise HTTPException(status_code=400, detail="新密码至少6位")
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT password_hash FROM users WHERE id = ?",
+            (int(user["sub"]),)
+        ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="用户不存在")
+        if not verify_password(req.old_password, row["password_hash"]):
+            raise HTTPException(status_code=400, detail="原密码错误")
+        conn.execute(
+            "UPDATE users SET password_hash = ? WHERE id = ?",
+            (hash_password(req.new_password), int(user["sub"]))
+        )
+    return {"success": True, "message": "密码修改成功"}

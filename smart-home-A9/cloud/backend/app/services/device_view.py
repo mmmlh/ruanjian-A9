@@ -9,6 +9,13 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
 
 ONLINE_FRESHNESS_WINDOW = timedelta(minutes=10)
+MODE_LABELS = {
+    "cool": "制冷",
+    "heat": "制热",
+    "dehumidify": "除湿",
+    "fan_only": "送风",
+    "auto": "自动",
+}
 
 
 def parse_updated_at(value: str | None) -> datetime | None:
@@ -72,32 +79,49 @@ def _safe_int(value: Any) -> int | None:
         return None
 
 
+def _mode_label(value: Any) -> str:
+    raw = str(value or "auto")
+    return MODE_LABELS.get(raw, raw)
+
+
 def summarize_device_status(device_type: str, status: Mapping[str, Any]) -> str:
     if device_type in {"light", "smart_plug"}:
-        return "Power on" if status.get("power") == "on" else "Power off"
+        return "已开启" if status.get("power") == "on" else "已关闭"
     if device_type == "ac":
         if status.get("power") == "on":
-            return f"{status.get('mode', 'cool')} {status.get('temp', 26)}C"
-        return "Standby"
+            return f"{_mode_label(status.get('mode', 'cool'))} {status.get('temp', 26)}°C"
+        return "待机中"
     if device_type == "door_lock":
-        return "Locked" if status.get("locked", True) else "Unlocked"
+        return "已上锁" if status.get("locked", True) else "已解锁"
     if device_type == "temperature_sensor":
         value = status.get("value")
+        if value is None:
+            return "暂无读数"
         unit = status.get("unit", "celsius")
-        return f"{value} {unit}" if value is not None else "No reading"
+        if unit == "celsius":
+            return f"{value}°C"
+        if unit == "fahrenheit":
+            return f"{value}°F"
+        return f"{value} {unit}"
     if device_type == "humidity_sensor":
         value = status.get("value")
-        return f"{value}%" if value is not None else "No reading"
+        return f"{value}%" if value is not None else "暂无读数"
     if device_type == "pir_sensor":
-        return "Motion detected" if status.get("presence") else "No motion"
+        return "检测到活动" if status.get("presence") else "无人活动"
     if device_type == "curtain":
         position = _safe_int(status.get("position"))
-        return f"Open {position}%" if position is not None else "Unknown position"
+        if position is None:
+            return "位置未知"
+        if position <= 0:
+            return "已关闭"
+        if position >= 100:
+            return "已全开"
+        return f"开启 {position}%"
     if device_type == "humidifier":
         if status.get("power") == "on":
             target_humidity = _safe_int(status.get("target_humidity"))
-            return f"Target humidity {target_humidity}%" if target_humidity is not None else "Unknown target humidity"
-        return "Power off"
+            return f"目标湿度 {target_humidity}%" if target_humidity is not None else "运行中"
+        return "已关闭"
     return json.dumps(status, ensure_ascii=False)
 
 

@@ -1,7 +1,63 @@
 """
 建表 + 初始数据
 """
+import json
 import sqlite3
+
+
+LEGACY_RULE_1_CONDITION_JSON = json.dumps(
+    {
+        "trigger": "pir_sensor",
+        "field": "presence",
+        "operator": "eq",
+        "value": True,
+        "and": [
+            {
+                "trigger": "light",
+                "field": "power",
+                "operator": "eq",
+                "value": "off",
+            }
+        ],
+    },
+    separators=(",", ":"),
+)
+LEGACY_RULE_1_ACTION_JSON = json.dumps(
+    [{"device_type": "light", "action": "on", "params": {"brightness": 80}}],
+    separators=(",", ":"),
+)
+
+
+def repair_legacy_rule_payloads(conn: sqlite3.Connection):
+    """Repair known malformed seed payloads in existing databases."""
+    rows = conn.execute(
+        "SELECT id, condition_json, action_json FROM automation_rules"
+    ).fetchall()
+
+    for row in rows:
+        if row["id"] != 1 or row["action_json"] != LEGACY_RULE_1_ACTION_JSON:
+            continue
+
+        try:
+            json.loads(row["condition_json"])
+        except json.JSONDecodeError:
+            conn.execute(
+                "UPDATE automation_rules SET condition_json = ? WHERE id = ?",
+                (LEGACY_RULE_1_CONDITION_JSON, row["id"]),
+            )
+
+
+def ensure_schema(conn: sqlite3.Connection):
+    """Backfill columns for older local databases created before schema changes."""
+    device_columns = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(devices)").fetchall()
+    }
+    if device_columns and "updated_at" not in device_columns:
+        conn.execute("ALTER TABLE devices ADD COLUMN updated_at DATETIME")
+        conn.execute(
+            "UPDATE devices SET updated_at = COALESCE(updated_at, created_at, CURRENT_TIMESTAMP)"
+        )
 
 
 def create_tables(conn: sqlite3.Connection):
@@ -34,7 +90,8 @@ def create_tables(conn: sqlite3.Connection):
         brand       TEXT,
         mqtt_topic  TEXT NOT NULL,
         status_json TEXT DEFAULT '{}',
-        created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+        created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
     -- 传感器数据表
@@ -58,6 +115,18 @@ def create_tables(conn: sqlite3.Connection):
         user_id     INTEGER REFERENCES users(id),
         timestamp   DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS activity_log (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_type  TEXT NOT NULL,
+        title       TEXT NOT NULL,
+        detail      TEXT,
+        source      TEXT NOT NULL,
+        device_id   INTEGER REFERENCES devices(id),
+        user_id     INTEGER REFERENCES users(id),
+        timestamp   DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_activity_log_ts
+        ON activity_log(timestamp);
 
     -- 场景表
     CREATE TABLE IF NOT EXISTS scenes (
@@ -79,12 +148,14 @@ def create_tables(conn: sqlite3.Connection):
         created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
     );
     """)
+    ensure_schema(conn)
 
 
 def seed_data(conn: sqlite3.Connection):
     """插入初始数据（仅当表为空时）"""
     count = conn.execute("SELECT COUNT(*) FROM rooms").fetchone()[0]
     if count > 0:
+        repair_legacy_rule_payloads(conn)
         return
 
     # ── 默认用户 admin/admin123 ──
@@ -152,6 +223,39 @@ def seed_data(conn: sqlite3.Connection):
         "(11, 2, 'ac', '卧室空调', 'haier', 'home/bedroom/ac', '{\"power\":\"off\",\"mode\":\"cool\",\"temp\":26}')"
     )
 
+    # ── 书房 ──
+    conn.execute("INSERT INTO rooms (id, name, floor, description) VALUES (3, '书房', 1, '书房工作间')")
+    conn.execute(
+        "INSERT INTO devices (id, room_id, type, name, brand, mqtt_topic, status_json) VALUES "
+        "(12, 3, 'temperature_sensor', '书房温度', NULL, 'home/study/temperature_sensor', "
+        "'{\"value\":24.0,\"unit\":\"celsius\"}')"
+    )
+    conn.execute(
+        "INSERT INTO devices (id, room_id, type, name, brand, mqtt_topic, status_json) VALUES "
+        "(13, 3, 'light', '书房灯', NULL, 'home/study/light', '{\"power\":\"off\",\"brightness\":0}')"
+    )
+    conn.execute(
+        "INSERT INTO devices (id, room_id, type, name, brand, mqtt_topic, status_json) VALUES "
+        "(14, 3, 'ac', '书房空调', 'midea', 'home/study/ac', '{\"power\":\"off\",\"mode\":\"cool\",\"temp\":26}')"
+    )
+
+    # ── 扩展设备：窗帘 ──
+    conn.execute(
+        "INSERT INTO devices (id, room_id, type, name, brand, mqtt_topic, status_json) VALUES "
+        "(15, 1, 'curtain', '客厅窗帘', NULL, 'home/livingroom/curtain', '{\"position\":0}')"
+    )
+    conn.execute(
+        "INSERT INTO devices (id, room_id, type, name, brand, mqtt_topic, status_json) VALUES "
+        "(16, 3, 'curtain', '书房窗帘', NULL, 'home/study/curtain', '{\"position\":0}')"
+    )
+
+    # ── 扩展设备：加湿器 ──
+    conn.execute(
+        "INSERT INTO devices (id, room_id, type, name, brand, mqtt_topic, status_json) VALUES "
+        "(17, 2, 'humidifier', '卧室加湿器', NULL, 'home/bedroom/humidifier', "
+        "'{\"power\":\"off\",\"level\":2,\"target_humidity\":60}')"
+    )
+
     # ── 场景 ──
     conn.execute(
         "INSERT INTO scenes (id, name, icon, description, actions_json) VALUES "
@@ -162,11 +266,16 @@ def seed_data(conn: sqlite3.Connection):
     )
     conn.execute(
         "INSERT INTO scenes (id, name, icon, description, actions_json) VALUES "
-        "(2, '离家模式', '🚪', '出门一键关闭：所有灯灭 + 空调关闭 + 门禁上锁', "
+        "(2, '离家模式', '🚪', '出门一键关闭：所有灯灭 + 空调关闭 + 窗帘关闭 + 门禁上锁', "
         "'[{\"device_type\":\"light\",\"room_id\":\"livingroom\",\"action\":\"off\",\"params\":{}},"
         "{\"device_type\":\"light\",\"room_id\":\"bedroom\",\"action\":\"off\",\"params\":{}},"
+        "{\"device_type\":\"light\",\"room_id\":\"study\",\"action\":\"off\",\"params\":{}},"
         "{\"device_type\":\"ac\",\"room_id\":\"livingroom\",\"action\":\"off\",\"params\":{}},"
         "{\"device_type\":\"ac\",\"room_id\":\"bedroom\",\"action\":\"off\",\"params\":{}},"
+        "{\"device_type\":\"ac\",\"room_id\":\"study\",\"action\":\"off\",\"params\":{}},"
+        "{\"device_type\":\"curtain\",\"room_id\":\"livingroom\",\"action\":\"close\",\"params\":{}},"
+        "{\"device_type\":\"curtain\",\"room_id\":\"study\",\"action\":\"close\",\"params\":{}},"
+        "{\"device_type\":\"humidifier\",\"room_id\":\"bedroom\",\"action\":\"off\",\"params\":{}},"
         "{\"device_type\":\"door_lock\",\"room_id\":\"livingroom\",\"action\":\"lock\",\"params\":{}}]')"
     )
     conn.execute(
@@ -182,7 +291,7 @@ def seed_data(conn: sqlite3.Connection):
         "INSERT INTO automation_rules (id, name, condition_json, action_json, enabled) VALUES "
         "(1, '人来开灯', "
         "'{\"trigger\":\"pir_sensor\",\"field\":\"presence\",\"operator\":\"eq\",\"value\":true,"
-        "\"and\":[{\"trigger\":\"light\",\"field\":\"power\",\"operator\":\"eq\",\"value\":\"off\"]}', "
+        "\"and\":[{\"trigger\":\"light\",\"field\":\"power\",\"operator\":\"eq\",\"value\":\"off\"}]}', "
         "'[{\"device_type\":\"light\",\"action\":\"on\",\"params\":{\"brightness\":80}}]', 1)"
     )
     conn.execute(
@@ -206,3 +315,5 @@ def seed_data(conn: sqlite3.Connection):
         "\"and\":[{\"trigger\":\"ac\",\"field\":\"power\",\"operator\":\"eq\",\"value\":\"off\"}]}', "
         "'[{\"device_type\":\"ac\",\"action\":\"set\",\"params\":{\"power\":\"on\",\"mode\":\"dehumidify\"}}]', 1)"
     )
+
+    repair_legacy_rule_payloads(conn)

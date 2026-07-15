@@ -1,5 +1,5 @@
 """
-设备联动规则引擎 — 监听传感器数据，条件满足时自动触发动作
+Rule engine for evaluating sensor-triggered automation rules.
 """
 import json
 import logging
@@ -8,86 +8,112 @@ from typing import Any
 
 from app.database.connection import get_db
 from app.services import mqtt_client
+from app.services.activity_log import write_activity
+from app.services.rule_payloads import (
+    RulePayloadError,
+    parse_action_json,
+    parse_condition_json,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class RuleEngine:
-    """规则引擎单例"""
+    """In-memory rule engine singleton."""
 
     def __init__(self):
         self._rules: list[dict] = []
-        self._device_states: dict[int, dict] = {}  # device_id -> status
-        self._device_id_map: dict[str, int] = {}     # "room_id/type" -> device_id
+        self._device_states: dict[int, dict] = {}
+        self._device_id_map: dict[str, int] = {}
         self._lock = threading.Lock()
 
     def reload_rules(self):
-        """从数据库重新加载所有启用的规则，并构建设备索引"""
+        """Reload enabled rules and pre-parse executable payloads."""
         with get_db() as conn:
             rows = conn.execute(
                 "SELECT * FROM automation_rules WHERE enabled = 1"
             ).fetchall()
-            # 构建设备 ID 索引（一次性加载全部，避免后续每条消息都查 DB）
             devices = conn.execute(
                 "SELECT id, type, mqtt_topic FROM devices"
             ).fetchall()
+
+        compiled_rules: list[dict] = []
+        skipped_rules = 0
+        for row in rows:
+            rule = dict(row)
+            try:
+                rule["condition"] = parse_condition_json(rule["condition_json"])
+                rule["actions"] = parse_action_json(rule["action_json"])
+            except RulePayloadError as exc:
+                skipped_rules += 1
+                logger.warning("skipped invalid rule payload [%s]: %s", rule["name"], exc.code)
+                continue
+            compiled_rules.append(rule)
+
         with self._lock:
-            self._rules = [dict(r) for r in rows]
+            self._rules = compiled_rules
             self._device_id_map.clear()
-            for d in devices:
-                # mqtt_topic 格式: home/livingroom/temperature_sensor
-                parts = d["mqtt_topic"].split("/")
+            for device in devices:
+                parts = device["mqtt_topic"].split("/")
                 if len(parts) >= 3:
-                    key = f"{parts[1]}/{parts[2]}"  # e.g. "livingroom/temperature_sensor"
-                    self._device_id_map[key] = d["id"]
-        logger.info(f"规则引擎已加载 {len(self._rules)} 条规则, {len(self._device_id_map)} 个设备索引")
+                    key = f"{parts[1]}/{parts[2]}"
+                    self._device_id_map[key] = device["id"]
+
+        logger.info(
+            "rule engine loaded %s rules, %s device indexes, skipped=%s",
+            len(self._rules),
+            len(self._device_id_map),
+            skipped_rules,
+        )
 
     def update_device_state(self, device_id: int, state: dict):
-        """更新设备状态缓存"""
         with self._lock:
             self._device_states[device_id] = state
 
     def _get_device_id(self, room_id: str, device_type: str) -> int | None:
-        """从索引中获取 device_id（无 DB 查询）"""
         key = f"{room_id}/{device_type}"
         return self._device_id_map.get(key)
 
     def on_sensor_data(self, topic: str, payload: Any):
-        """收到传感器数据时触发规则检查"""
         if isinstance(payload, str):
             try:
                 payload = json.loads(payload)
             except json.JSONDecodeError:
                 return
 
-        # 从 topic 解析 room_id 和设备类型
         parts = topic.split("/")
         if len(parts) < 3:
             return
         room_id = parts[1]
         sensor_type = parts[2]
 
-        # 更新设备状态缓存（使用索引，无 DB 查询）
         device_id = self._get_device_id(room_id, sensor_type)
         if device_id is not None:
             self.update_device_state(device_id, payload)
 
-        # 检查所有规则
         with self._lock:
             rules = list(self._rules)
 
         for rule in rules:
             try:
-                condition = json.loads(rule["condition_json"])
+                condition = rule["condition"]
                 if self._evaluate(condition, sensor_type, payload, room_id):
-                    actions = json.loads(rule["action_json"])
+                    actions = rule["actions"]
                     self._execute_actions(actions, room_id)
-                    logger.info(f"规则触发: {rule['name']}")
-            except Exception as e:
-                logger.error(f"规则执行异常 [{rule['name']}]: {e}")
+                    logger.info("rule triggered: %s", rule["name"])
+                    write_activity(
+                        event_type="rule",
+                        title=rule["name"],
+                        detail=json.dumps(
+                            {"room_id": room_id, "trigger": sensor_type},
+                            ensure_ascii=False,
+                        ),
+                        source="rules.trigger",
+                    )
+            except Exception as exc:
+                logger.error("rule execution failed [%s]: %s", rule["name"], exc)
 
     def _evaluate(self, condition: dict, sensor_type: str, payload: dict, room_id: str) -> bool:
-        """评估规则条件"""
         trigger_type = condition.get("trigger")
         if trigger_type != sensor_type:
             return False
@@ -103,7 +129,6 @@ class RuleEngine:
         if not self._compare(actual, operator, expected):
             return False
 
-        # 检查附加条件（and）— 全部从内存缓存查找
         and_conditions = condition.get("and", [])
         for sub in and_conditions:
             sub_trigger = sub.get("trigger")
@@ -123,25 +148,23 @@ class RuleEngine:
         return True
 
     def _compare(self, actual: Any, operator: str, expected: Any) -> bool:
-        """比较操作"""
         if operator == "eq":
             return actual == expected
-        elif operator == "neq":
+        if operator == "neq":
             return actual != expected
-        elif operator == "gt":
+        if operator == "gt":
             return float(actual) > float(expected)
-        elif operator == "lt":
+        if operator == "lt":
             return float(actual) < float(expected)
-        elif operator == "gte":
+        if operator == "gte":
             return float(actual) >= float(expected)
-        elif operator == "lte":
+        if operator == "lte":
             return float(actual) <= float(expected)
-        elif operator == "changed":
+        if operator == "changed":
             return True
         return False
 
     def _find_device_state(self, device_type: str, room_id: str) -> dict | None:
-        """从内存缓存中查找指定房间、指定类型的设备状态"""
         device_id = self._get_device_id(room_id, device_type)
         if device_id is not None:
             with self._lock:
@@ -149,7 +172,6 @@ class RuleEngine:
         return None
 
     def _execute_actions(self, actions: list[dict], room_id: str):
-        """执行规则动作列表"""
         for action in actions:
             device_type = action.get("device_type")
             action_name = action.get("action")
@@ -159,14 +181,12 @@ class RuleEngine:
             if target_room == "same":
                 target_room = room_id
 
-            # 构建 MQTT 主题和载荷
             topic = f"home/{target_room}/{device_type}/command"
             payload = {"action": action_name}
             payload.update(params)
 
             mqtt_client.publish_message(topic, json.dumps(payload))
-            logger.info(f"规则动作: {topic} -> {payload}")
+            logger.info("rule action: %s -> %s", topic, payload)
 
 
-# 全局规则引擎实例
 rule_engine = RuleEngine()

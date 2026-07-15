@@ -69,3 +69,40 @@ class TestDeviceLogs:
         data = r.json()
         assert len(data) >= 1
         assert data[0]["action"] == "on"
+        assert data[0]["event_type"] == "device"
+        assert data[0]["title"] == "on"
+        assert data[0]["source"] == "device_log"
+
+    def test_logs_endpoint_returns_activity_log_records(self, client, auth_headers):
+        with get_db() as conn:
+            conn.execute(
+                "INSERT INTO activity_log (event_type, title, detail, source, user_id) VALUES (?, ?, ?, ?, ?)",
+                ("scene", "Home Mode", "Executed scene", "scenes.execute", 1),
+            )
+
+        response = client.get("/api/data/logs", headers=auth_headers)
+
+        assert response.status_code == 200
+        items = response.json()
+        assert any(item.get("event_type") == "scene" for item in items)
+        scene_item = next(item for item in items if item.get("event_type") == "scene")
+        assert scene_item["title"] == "Home Mode"
+        assert scene_item["source"] == "scenes.execute"
+
+    def test_logs_endpoint_filters_by_event_type(self, client, auth_headers):
+        with get_db() as conn:
+            conn.execute(
+                "INSERT INTO activity_log (event_type, title, detail, source, user_id) VALUES (?, ?, ?, ?, ?)",
+                ("scene", "Away Mode", "Executed scene", "scenes.execute", 1),
+            )
+            conn.execute(
+                "INSERT INTO activity_log (event_type, title, detail, source, user_id) VALUES (?, ?, ?, ?, ?)",
+                ("rule", "Auto Cool", "Triggered rule", "rules.trigger", 1),
+            )
+
+        response = client.get("/api/data/logs?event_type=scene", headers=auth_headers)
+
+        assert response.status_code == 200
+        items = response.json()
+        assert items
+        assert all(item["event_type"] == "scene" for item in items)

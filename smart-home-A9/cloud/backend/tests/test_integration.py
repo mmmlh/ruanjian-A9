@@ -2,6 +2,7 @@
 端到端集成测试 — 模拟真实用户操作流程
 """
 import json
+import logging
 
 
 class TestUserFlow:
@@ -31,30 +32,30 @@ class TestUserFlow:
         room = resp.json()
         assert "devices" in room
         living_devices = room["devices"]
-        assert len(living_devices) == 6  # 客厅有6个设备
+        assert len(living_devices) == 7  # 客厅包含窗帘后共有7个设备
         print(f"  ✅ 客厅设备数: {len(living_devices)}")
 
         # ── 第三步：列出并筛选设备 ──
         resp = client.get("/api/devices", headers=headers)
         assert resp.status_code == 200
         all_devices = resp.json()
-        assert len(all_devices) == 11  # 总共11个设备
+        assert len(all_devices) == 17  # 当前种子数据共17个设备
         device_types = set(d["type"] for d in all_devices)
-        expected_types = {"temperature_sensor", "humidity_sensor", "pir_sensor", "light", "ac", "door_lock"}
+        expected_types = {"temperature_sensor", "humidity_sensor", "pir_sensor", "light", "ac", "door_lock", "curtain", "humidifier"}
         assert expected_types.issubset(device_types)
         print(f"  ✅ 设备总数: {len(all_devices)}, 类型: {device_types}")
 
         # 按房间筛选
         resp = client.get(f"/api/devices?room_id={living_room_id}", headers=headers)
         assert resp.status_code == 200
-        assert len(resp.json()) == 6
+        assert len(resp.json()) == 7
         print(f"  ✅ 客厅筛选: {len(resp.json())} 个设备")
 
         # 按类型筛选
         resp = client.get("/api/devices?type=light", headers=headers)
         assert resp.status_code == 200
         lights = resp.json()
-        assert len(lights) == 2  # 客厅和卧室各一个灯
+        assert len(lights) == 3  # 客厅、卧室、书房各一个灯
         print(f"  ✅ 灯光设备: {len(lights)} 个")
 
         # ── 第四步：获取设备详情 ──
@@ -229,12 +230,28 @@ class TestUserFlow:
             json={
                 "name": "测试规则-回家自动开空调",
                 "description": "当温度超过30度且有人时开制冷",
-                "condition_json": json.dumps({"type": "and", "conditions": [
-                    {"field": "temperature", "op": "gt", "value": 30},
-                    {"field": "presence", "op": "eq", "value": True},
-                ]}),
+                "condition_json": json.dumps({
+                    "trigger": "temperature_sensor",
+                    "field": "value",
+                    "operator": "gt",
+                    "value": 30,
+                    "and": [
+                        {
+                            "trigger": "pir_sensor",
+                            "field": "presence",
+                            "operator": "eq",
+                            "value": True,
+                        }
+                    ],
+                }),
                 "action_json": json.dumps([
-                    {"device_id": living_ac["id"], "action": "set", "params": {"mode": "cool", "temperature": 25}},
+                    {
+                        "device_id": living_ac["id"],
+                        "device_type": "ac",
+                        "room_id": "livingroom",
+                        "action": "set",
+                        "params": {"power": "on", "mode": "cool", "temp": 25},
+                    },
                 ]),
             },
             headers=headers,
@@ -368,20 +385,22 @@ class TestDataConsistency:
             detail = resp.json()
             assert "device_count" in detail or "devices" in detail
 
-        # 设备总数 = 11
+        # 设备总数 = 17
         devices = client.get("/api/devices", headers=headers).json()
-        assert len(devices) == 11
+        assert len(devices) == 17
 
         # 每种类型设备 > 0
         type_count = {}
         for d in devices:
             type_count[d["type"]] = type_count.get(d["type"], 0) + 1
-        assert type_count.get("temperature_sensor", 0) == 2
+        assert type_count.get("temperature_sensor", 0) == 3
         assert type_count.get("humidity_sensor", 0) == 2
         assert type_count.get("pir_sensor", 0) == 2
-        assert type_count.get("light", 0) == 2
-        assert type_count.get("ac", 0) == 2
+        assert type_count.get("light", 0) == 3
+        assert type_count.get("ac", 0) == 3
         assert type_count.get("door_lock", 0) == 1
+        assert type_count.get("curtain", 0) == 2
+        assert type_count.get("humidifier", 0) == 1
 
         # 场景数 = 3
         scenes = client.get("/api/scenes", headers=headers).json()
@@ -397,6 +416,74 @@ class TestDataConsistency:
         assert me["role"] == "admin"
 
         print(f"  ✅ 种子数据完整: {len(rooms)}房, {len(devices)}设备, {len(scenes)}场景, {len(rules)}规则")
+
+
+    def test_seed_rules_use_valid_json_payloads(self, client, db):
+        rows = db.execute(
+            "SELECT id, name, condition_json, action_json FROM automation_rules ORDER BY id"
+        ).fetchall()
+
+        assert rows
+
+        for row in rows:
+            condition = json.loads(row["condition_json"])
+            actions = json.loads(row["action_json"])
+
+            assert isinstance(condition, dict), row["name"]
+            assert isinstance(actions, list), row["name"]
+
+    def test_init_db_repairs_legacy_broken_rule_json(self, client, db):
+        from app.database.connection import init_db
+
+        broken_condition = (
+            '{"trigger":"pir_sensor","field":"presence","operator":"eq","value":true,'
+            '"and":[{"trigger":"light","field":"power","operator":"eq","value":"off"]}'
+        )
+
+        db.execute(
+            "UPDATE automation_rules SET condition_json = ? WHERE id = 1",
+            (broken_condition,),
+        )
+        db.commit()
+
+        init_db()
+
+        repaired = db.execute(
+            "SELECT condition_json FROM automation_rules WHERE id = 1"
+        ).fetchone()
+
+        condition = json.loads(repaired["condition_json"])
+
+        assert condition["trigger"] == "pir_sensor"
+        assert condition["field"] == "presence"
+        assert condition["operator"] == "eq"
+        assert condition["value"] is True
+        assert condition["and"][0]["trigger"] == "light"
+        assert condition["and"][0]["field"] == "power"
+        assert condition["and"][0]["operator"] == "eq"
+        assert condition["and"][0]["value"] == "off"
+
+    def test_rule_engine_skips_invalid_rules_during_reload(self, client, db, caplog):
+        from app.services.rule_engine import rule_engine
+
+        broken_condition = (
+            '{"trigger":"pir_sensor","field":"presence","operator":"eq","value":true,'
+            '"and":[{"trigger":"light","field":"power","operator":"eq","value":"off"]}'
+        )
+
+        db.execute(
+            "UPDATE automation_rules SET condition_json = ? WHERE id = 1",
+            (broken_condition,),
+        )
+        db.commit()
+
+        with caplog.at_level(logging.WARNING):
+            rule_engine.reload_rules()
+
+        assert len(rule_engine._rules) == 3
+        assert any(
+            "skipped invalid rule payload" in record.message for record in caplog.records
+        )
 
 
 class TestAuthFlow:

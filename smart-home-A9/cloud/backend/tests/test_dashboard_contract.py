@@ -48,6 +48,9 @@ class TestDashboardContract:
         assert "status" in candidate
         assert "status_summary" in candidate
         assert "last_seen_at" in candidate
+        assert candidate["room_hint"] == "客厅"
+        assert candidate["name"] == "客厅氛围灯"
+        assert candidate["status_summary"] == "已关闭"
         assert isinstance(candidate["status_summary"], str)
         assert candidate["status_summary"].strip()
         parsed = datetime.fromisoformat(candidate["last_seen_at"].replace("Z", "+00:00"))
@@ -75,6 +78,7 @@ class TestDashboardContract:
             assert payload["success"] is True
             assert payload["device"]["room_id"] == 1
             assert payload["device"]["name"] == "Guest Lamp"
+            assert payload["message"] == f"设备“Guest Lamp”已绑定到“{payload['device']['room_name']}”"
             assert "T" in payload["device"]["last_seen_at"]
             assert payload["device"]["last_seen_at"].endswith("+00:00")
             parsed = datetime.fromisoformat(payload["device"]["last_seen_at"].replace("Z", "+00:00"))
@@ -157,3 +161,26 @@ class TestDashboardContract:
         assert devices[5]["online"] is True
         assert payload["stats"]["online_devices"] == 1
         assert payload["stats"]["offline_devices"] == len(devices) - 1
+
+    def test_dashboard_summary_recent_logs_merge_device_and_activity_entries(self, client, auth_headers, db):
+        db.execute(
+            "INSERT INTO device_log (device_id, action, detail, user_id, timestamp) VALUES (?, ?, ?, ?, ?)",
+            (4, "on", '{"brightness": 80}', 1, "2026-07-08 10:00:00"),
+        )
+        db.execute(
+            """
+            INSERT INTO activity_log (event_type, title, detail, source, device_id, user_id, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("scene", "Sleep Mode", "Scene executed", "scenes.execute", 4, 1, "2026-07-08 10:01:00"),
+        )
+        db.commit()
+
+        response = client.get("/api/dashboard/summary", headers=auth_headers)
+
+        assert response.status_code == 200
+        recent_logs = response.json()["recent_logs"]
+        assert recent_logs
+        assert recent_logs[0]["source"] == "scenes.execute"
+        assert any(item["source"] == "device_log" for item in recent_logs)
+        assert any(item["source"] == "scenes.execute" for item in recent_logs)

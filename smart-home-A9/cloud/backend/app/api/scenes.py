@@ -9,6 +9,7 @@ from typing import Optional
 from app.database.connection import get_db
 from app.api.auth import get_current_user
 from app.services import mqtt_client
+from app.services.activity_log import write_activity
 
 router = APIRouter(prefix="/api/scenes", tags=["场景管理"])
 
@@ -126,5 +127,13 @@ def execute_scene(scene_id: int, user: dict = Depends(get_current_user)):
 
         mqtt_client.publish_message(topic, json.dumps(payload))
         executed.append({"topic": topic, "action": action_name})
+
+    write_activity(
+        event_type="scene",
+        title=scene["name"],
+        detail=json.dumps({"executed": len(executed)}, ensure_ascii=False),
+        source="scenes.execute",
+        user_id=int(user["sub"]),
+    )
 
     return {"scene": scene["name"], "executed": len(executed), "actions": executed}
