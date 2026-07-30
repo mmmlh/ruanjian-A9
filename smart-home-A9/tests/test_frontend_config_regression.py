@@ -22,10 +22,10 @@ def test_server_connection_settings_live_in_a_dedicated_config_file():
     assert SERVER_CONFIG.exists()
     config_source = SERVER_CONFIG.read_text(encoding="utf-8")
     assert "export const SERVER_PROTOCOL: string = 'http'" in config_source
-    assert "export const SERVER_HOST: string = '8.162.10.179'" in config_source
+    assert "export const SERVER_HOST: string = 'localhost'" in config_source
     assert "export const SERVER_PORT: number = 8000" in config_source
     assert "export const SERVER_BASE_URL" in config_source
-    assert config_source.count("8.162.10.179") == 1
+    assert "8.162.10.179" not in config_source
     assert "8.162.10.179" not in login_source
     assert "8.162.10.179" not in api_source
     assert "8.162.10.179" not in storage_source
