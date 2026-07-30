@@ -110,6 +110,7 @@ struct DeviceManagePage {
   @State loading: boolean = false
   @State scanning: boolean = false
   @State binding: boolean = false
+  @State saving: boolean = false
   @State showEdit: boolean = false
   @State showAddFlow: boolean = false
   @State pendingDeleteId: number = -1
@@ -180,11 +181,15 @@ struct DeviceManagePage {
   }
 
   async doSave(): Promise<void> {
+    if (this.saving) {
+      return
+    }
     this.err = ''
     if (!this.en.trim()) {
       this.err = '设备名称不能为空'
       return
     }
+    this.saving = true
     try {
       await updateDeviceName(this.eid, this.en.trim(), this.eb.trim())
       this.showEdit = false
@@ -192,6 +197,8 @@ struct DeviceManagePage {
       await this.ld()
     } catch (err) {
       this.err = localizeMessage((err as Error).message, '保存设备信息失败')
+    } finally {
+      this.saving = false
     }
   }
 
@@ -653,6 +660,10 @@ struct DeviceManagePage {
           .fontSize(14)
           .padding({ left: ControlCenterTheme.spaceMd, right: ControlCenterTheme.spaceMd })
           .onChange((v: string) => { this.eb = v })
+        if (this.err) {
+          StatusBanner({ message: this.err, detail: '请检查设备名称或稍后重试', tone: 'danger' })
+            .margin({ top: ControlCenterTheme.spaceMd })
+        }
         Row() {
           Button('取消')
             .layoutWeight(1)
@@ -661,15 +672,17 @@ struct DeviceManagePage {
             .fontColor(ControlCenterTheme.textPrimary)
             .backgroundColor(ControlCenterTheme.surfaceMuted)
             .borderRadius(ControlCenterTheme.radiusInner)
+            .enabled(!this.saving)
             .onClick(() => { this.showEdit = false })
           Blank().width(ControlCenterTheme.spaceSm)
-          Button('保存')
+          Button(this.saving ? '保存中...' : '保存')
             .layoutWeight(1)
             .height(ControlCenterTheme.tapTarget)
             .fontSize(13)
             .fontColor(ControlCenterTheme.surface)
             .backgroundColor(ControlCenterTheme.accent)
             .borderRadius(ControlCenterTheme.radiusInner)
+            .enabled(!this.saving)
             .onClick(() => this.doSave())
         }
         .width('100%')
@@ -685,6 +698,6 @@ struct DeviceManagePage {
     .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Center)
     .backgroundColor(ControlCenterTheme.overlay)
-    .onClick(() => { this.showEdit = false })
+    .onClick(() => { if (!this.saving) { this.showEdit = false } })
   }
 }

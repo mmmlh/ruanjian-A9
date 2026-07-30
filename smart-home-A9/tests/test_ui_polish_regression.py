@@ -126,6 +126,27 @@ def test_compact_semantic_theme_and_shared_components_exist():
     assert "export struct ConfirmPanel" in kit
 
 
+def test_status_banner_stacks_copy_in_a_weighted_column_for_narrow_screens():
+    kit = (COMMON / "ControlCenterKit.ets").read_text(encoding="utf-8")
+    status_banner = braced_section(kit, "export struct StatusBanner")
+
+    copy_column = braced_section(status_banner, "Column()")
+    message = section_between(copy_column, "Text(this.message)", "if (this.detail)")
+    detail = braced_section(copy_column, "if (this.detail)")
+
+    assert status_banner.index("Text(this.toneLabel())") < status_banner.index("Column()")
+    assert copy_column.index("Text(this.message)") < copy_column.index("Text(this.detail)")
+    assert ".width('100%')" in message
+    assert ".layoutWeight(1)" not in message
+    assert ".width('100%')" in detail
+
+    column_end = status_banner.index(copy_column) + len(copy_column)
+    column_modifiers = status_banner[column_end:column_end + 160]
+    assert ".layoutWeight(1)" in column_modifiers
+    assert ".alignItems(HorizontalAlign.Start)" in column_modifiers
+    assert ".alignItems(VerticalAlign.Top)" in status_banner
+
+
 def test_navigation_and_action_svg_assets_are_bundled():
     names = [
         "nav_home.svg", "nav_devices.svg", "nav_automation.svg", "nav_profile.svg",
@@ -486,6 +507,46 @@ def test_device_delete_dismisses_confirmation_before_async_request():
     assert ".enabled(this.deletingId < 0)" in delete
 
 
+def test_device_edit_save_is_serialized_and_keeps_errors_inside_the_overlay():
+    text = source("DeviceManagePage.ets")
+    save_flow = braced_section(text, "async doSave()")
+    edit_dialog = braced_section(text, "@Builder Ed()")
+
+    assert "@State saving: boolean = false" in text
+    assert "if (this.saving)" in save_flow
+    assert save_flow.index("if (this.saving)") < save_flow.index("this.err = ''")
+    assert save_flow.index("if (!this.en.trim())") < save_flow.index("this.saving = true")
+    assert save_flow.index("this.saving = true") < save_flow.index("await updateDeviceName(")
+    assert "await updateDeviceName(this.eid, this.en.trim(), this.eb.trim())" in save_flow
+    assert "this.ok = '设备信息已更新'" in save_flow
+    assert save_flow.index("this.ok = '设备信息已更新'") < save_flow.index("await this.ld()")
+    assert "finally" in save_flow
+    assert "this.saving = false" in save_flow
+
+    edit_error = braced_section(edit_dialog, "if (this.err)")
+    assert "StatusBanner({" in edit_error
+    assert "message: this.err" in edit_error
+    assert "tone: 'danger'" in edit_error
+    assert edit_dialog.index("if (this.err)") < edit_dialog.index("Row() {")
+
+    cancel_button = section_between(
+        edit_dialog,
+        "Button('取消')",
+        ".onClick(() => { this.showEdit = false })",
+    )
+    save_button = section_between(
+        edit_dialog,
+        "Button(this.saving ? '保存中...' : '保存')",
+        ".onClick(() => this.doSave())",
+    )
+    for control in [cancel_button, save_button]:
+        assert ".enabled(!this.saving)" in control
+
+    overlay_close = edit_dialog[edit_dialog.index(".backgroundColor(ControlCenterTheme.overlay)"):]
+    assert "if (!this.saving)" in overlay_close
+    assert overlay_close.index("if (!this.saving)") < overlay_close.index("this.showEdit = false")
+
+
 def test_device_add_flow_replaces_long_bound_list_while_open():
     text = source("DeviceManagePage.ets")
     bound_view = braced_section(text, "if (!this.showAddFlow)")
@@ -603,6 +664,47 @@ def test_data_monitor_refresh_errors_are_owned_by_the_request_tab():
     assert "Text(this.errorMessage)" in feedback
 
 
+def test_data_monitor_uses_the_utf8_celsius_unit():
+    text = source("DataMonitorPage.ets")
+
+    assert "const DEGREE: string = '°C'" in text
+    assert "掳C" not in text
+
+
+def test_rules_chip_builders_use_stable_tap_target_height():
+    text = source("RulesPage.ets")
+
+    for marker in ["@Builder ruleTabChip", "@Builder buildChoiceChip"]:
+        chip = braced_section(text, marker)
+        assert ".height(ControlCenterTheme.tapTarget)" in chip
+
+
+def test_data_monitor_chip_builders_use_stable_tap_target_height():
+    text = source("DataMonitorPage.ets")
+
+    for marker in ["@Builder tabChip", "@Builder filterChip", "@Builder rangeChip"]:
+        chip = braced_section(text, marker)
+        assert ".height(ControlCenterTheme.tapTarget)" in chip
+
+
+def test_profile_password_disclosure_is_a_native_tap_target():
+    text = source("ProfilePage.ets")
+    security_card = braced_section(text, "@Builder buildSecurityCard()")
+
+    assert "Text(this.showPwd ? '隐藏' : '修改密码')" not in security_card
+    disclosure = section_between(
+        security_card,
+        "Button(this.showPwd ? '隐藏' : '修改密码')",
+        ".onClick(() => {",
+    )
+    assert ".height(ControlCenterTheme.tapTarget)" in disclosure
+    assert ".backgroundColor('#00000000')" in disclosure
+
+    action = braced_section(security_card, ".onClick(() =>")
+    assert "this.showPwd = !this.showPwd" in action
+    assert "this.pwdErr = ''" in action
+
+
 def test_rules_use_single_shared_add_action_and_overlay_confirmation():
     text = source("RulesPage.ets")
     build = braced_section(text, "build()")
@@ -631,9 +733,11 @@ def test_rules_use_single_shared_add_action_and_overlay_confirmation():
     delete_flow = braced_section(text, "async dD")
     assert "@State pendingDeleteId: number = -1" in text
     assert "@State deletingId: number = -1" in text
-    assert "if (this.deletingId >= 0)" in delete_flow
-    assert delete_flow.index("if (this.deletingId >= 0)") < delete_flow.index("this.deletingId = id")
+    delete_guard = "if (this.deletingId >= 0 || this.togglingId >= 0)"
+    assert delete_guard in delete_flow
+    assert delete_flow.index(delete_guard) < delete_flow.index("this.deletingId = id")
     assert delete_flow.index("this.pendingDeleteId = -1") < delete_flow.index("await deleteRule(id)")
+    assert delete_flow.index("await deleteRule(id)") < delete_flow.index("this.rules = await getRules()")
     assert "this.deletingId = -1" in delete_flow
 
     rule_list = braced_section(text, "@Builder buildRuleList()")
@@ -643,7 +747,7 @@ def test_rules_use_single_shared_add_action_and_overlay_confirmation():
         ".onClick(() => { this.pendingDeleteId = rule.id })",
     )
     assert ".height(ControlCenterTheme.tapTarget)" in delete_button
-    assert ".enabled(this.deletingId < 0)" in delete_button
+    assert ".enabled(this.togglingId < 0 && this.deletingId < 0)" in delete_button
     assert "onCancel: () => { this.pendingDeleteId = -1 }" in build
     assert "onConfirm: () => this.dD(this.pendingDeleteId)" in build
 
@@ -663,6 +767,16 @@ def test_rules_dialog_keeps_creation_errors_visible():
     assert dialog.index("if (this.showParams())") < error_index
     assert error_index < dialog.index("Button('取消')")
     assert dialog.count("message: this.errorMessage") == 1
+
+
+def test_rules_curtain_hint_describes_the_user_result_without_backend_copy():
+    text = source("RulesPage.ets")
+    dialog = braced_section(text, "@Builder buildDialog()")
+    curtain_hint = braced_section(dialog, "else if (this.targetType === 'curtain')")
+
+    assert "执行时窗帘将移动至全开位置" in curtain_hint
+    for path in PAGES.glob("*.ets"):
+        assert "保持与现有后端契约一致" not in path.read_text(encoding="utf-8")
 
 
 def test_rules_creation_is_serialized_and_dialog_controls_respect_busy_state():
@@ -695,8 +809,9 @@ def test_rules_toggle_requests_are_serialized_and_controls_are_disabled_while_bu
     rule_list = braced_section(text, "@Builder buildRuleList()")
 
     assert "@State togglingId: number = -1" in text
-    assert "if (this.togglingId >= 0)" in toggle_flow
-    assert toggle_flow.index("if (this.togglingId >= 0)") < toggle_flow.index("this.togglingId = id")
+    toggle_guard = "if (this.togglingId >= 0 || this.deletingId >= 0)"
+    assert toggle_guard in toggle_flow
+    assert toggle_flow.index(toggle_guard) < toggle_flow.index("this.togglingId = id")
     assert toggle_flow.index("this.togglingId = id") < toggle_flow.index("await toggleRule(id)")
     assert toggle_flow.index("await toggleRule(id)") < toggle_flow.index("this.rules = await getRules()")
     assert "finally" in toggle_flow
@@ -707,7 +822,7 @@ def test_rules_toggle_requests_are_serialized_and_controls_are_disabled_while_bu
         "Toggle({ type: ToggleType.Switch, isOn: rule.enabled === 1 })",
         ".onChange((isOn: boolean) => { this.dT(rule.id) })",
     )
-    assert ".enabled(this.togglingId < 0)" in toggle_control
+    assert ".enabled(this.togglingId < 0 && this.deletingId < 0)" in toggle_control
 
 
 def test_profile_uses_single_confirmed_logout_action_in_stack_overlay():

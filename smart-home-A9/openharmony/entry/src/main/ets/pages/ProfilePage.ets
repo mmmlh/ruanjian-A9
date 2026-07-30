@@ -234,10 +234,12 @@ struct ProfilePage {
       Row() {
         this.cardTitle('安全设置', '更新您的账户密码')
         Blank()
-        Text(this.showPwd ? '隐藏' : '修改密码')
+        Button(this.showPwd ? '隐藏' : '修改密码')
+          .height(ControlCenterTheme.tapTarget)
           .fontSize(12)
           .fontWeight(FontWeight.Bold)
           .fontColor(PRIMARY)
+          .backgroundColor('#00000000')
           .onClick(() => {
             this.showPwd = !this.showPwd
             this.pwdErr = ''

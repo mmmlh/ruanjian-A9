@@ -82,7 +82,7 @@ struct RulesPage {
   }
 
   async dT(id: number): Promise<void> {
-    if (this.togglingId >= 0) {
+    if (this.togglingId >= 0 || this.deletingId >= 0) {
       return
     }
     this.togglingId = id
@@ -98,7 +98,7 @@ struct RulesPage {
   }
 
   async dD(id: number): Promise<void> {
-    if (this.deletingId >= 0) {
+    if (this.deletingId >= 0 || this.togglingId >= 0) {
       return
     }
     this.deletingId = id
@@ -520,6 +520,7 @@ struct RulesPage {
 
   @Builder ruleTabChip(label: string, active: boolean, action: () => void) {
     Text(label)
+      .height(ControlCenterTheme.tapTarget)
       .fontSize(13)
       .fontWeight(active ? FontWeight.Bold : FontWeight.Medium)
       .fontColor(active ? ControlCenterTheme.textPrimary : ControlCenterTheme.textSecondary)
@@ -574,7 +575,7 @@ struct RulesPage {
               Row() {
                 Toggle({ type: ToggleType.Switch, isOn: rule.enabled === 1 })
                   .selectedColor(ControlCenterTheme.accent)
-                  .enabled(this.togglingId < 0)
+                  .enabled(this.togglingId < 0 && this.deletingId < 0)
                   .onChange((isOn: boolean) => { this.dT(rule.id) })
                 Blank()
                 Button(this.deletingId === rule.id ? '删除中...' : '删除')
@@ -585,7 +586,7 @@ struct RulesPage {
                   .padding({ left: ControlCenterTheme.spaceMd, right: ControlCenterTheme.spaceMd })
                   .borderRadius(ControlCenterTheme.radiusInner)
                   .backgroundColor(ControlCenterTheme.dangerSoft)
-                  .enabled(this.deletingId < 0)
+                  .enabled(this.togglingId < 0 && this.deletingId < 0)
                   .onClick(() => { this.pendingDeleteId = rule.id })
               }
               .width('100%')
@@ -652,6 +653,7 @@ struct RulesPage {
 
   @Builder buildChoiceChip(label: string, active: boolean, action: () => void) {
     Text(label)
+      .height(ControlCenterTheme.tapTarget)
       .fontSize(12)
       .fontWeight(active ? FontWeight.Bold : FontWeight.Medium)
       .fontColor(active ? ControlCenterTheme.textOnDark : ControlCenterTheme.textSecondary)
@@ -840,7 +842,7 @@ struct RulesPage {
               } else if (this.targetType === 'humidifier') {
                 this.buildDialogSlider('目标湿度', this.targetHumidityValue.toString() + '%', this.targetHumidityValue, 40, 80, 1, (value: number) => { this.targetHumidityValue = value })
               } else if (this.targetType === 'curtain') {
-                StatusBanner({ message: '当前窗帘设置动作将默认执行到全开位置', detail: '保持与现有后端契约一致', tone: 'info' })
+                StatusBanner({ message: '执行时窗帘将移动至全开位置', detail: '规则触发后自动执行', tone: 'info' })
                   .margin({ top: 12 })
               }
             }

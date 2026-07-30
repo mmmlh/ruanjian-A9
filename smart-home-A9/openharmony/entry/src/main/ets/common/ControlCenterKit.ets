@@ -393,18 +393,25 @@ export struct StatusBanner {
         .fontWeight(FontWeight.Bold)
         .fontColor(ControlCenterTheme.textPrimary)
         .margin({ right: ControlCenterTheme.spaceSm })
-      Text(this.message)
-        .fontSize(13)
-        .fontWeight(FontWeight.Medium)
-        .fontColor(ControlCenterTheme.textPrimary)
-        .layoutWeight(1)
-      if (this.detail) {
-        Text(this.detail)
-          .fontSize(12)
+      Column() {
+        Text(this.message)
+          .width('100%')
+          .fontSize(13)
+          .fontWeight(FontWeight.Medium)
           .fontColor(ControlCenterTheme.textPrimary)
+        if (this.detail) {
+          Text(this.detail)
+            .width('100%')
+            .fontSize(12)
+            .fontColor(ControlCenterTheme.textPrimary)
+            .margin({ top: ControlCenterTheme.spaceXs })
+        }
       }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
     }
     .width('100%')
+    .alignItems(VerticalAlign.Top)
     .padding({ left: 14, right: 14, top: 12, bottom: 12 })
     .borderRadius(ControlCenterTheme.radiusInner)
     .backgroundColor(this.bg())

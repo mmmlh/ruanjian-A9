@@ -12,7 +12,7 @@ const POSITIVE: string = ControlCenterTheme.accent
 const TEXT_PRIMARY: string = ControlCenterTheme.textPrimary
 const TEXT_SECONDARY: string = ControlCenterTheme.textSecondary
 const SEPARATOR: string = ' 路 '
-const DEGREE: string = '掳C'
+const DEGREE: string = '°C'
 
 function localizeMessage(message: string, fallback: string): string {
   if (!message) {
@@ -416,6 +416,7 @@ struct DataMonitorPage {
 
   @Builder tabChip(label: string, active: boolean, action: () => void) {
     Text(label)
+      .height(ControlCenterTheme.tapTarget)
       .fontSize(12)
       .fontWeight(active ? FontWeight.Bold : FontWeight.Medium)
       .fontColor(active ? '#FFFFFF' : TEXT_SECONDARY)
@@ -573,6 +574,7 @@ struct DataMonitorPage {
 
   @Builder filterChip(label: string, active: boolean, action: () => void) {
     Text(label)
+      .height(ControlCenterTheme.tapTarget)
       .fontSize(12)
       .fontWeight(active ? FontWeight.Bold : FontWeight.Medium)
       .fontColor(active ? '#FFFFFF' : TEXT_SECONDARY)
@@ -585,6 +587,7 @@ struct DataMonitorPage {
 
   @Builder rangeChip(label: string, active: boolean, action: () => void) {
     Text(label)
+      .height(ControlCenterTheme.tapTarget)
       .fontSize(12)
       .fontWeight(active ? FontWeight.Bold : FontWeight.Medium)
       .fontColor(active ? '#FFFFFF' : TEXT_SECONDARY)
