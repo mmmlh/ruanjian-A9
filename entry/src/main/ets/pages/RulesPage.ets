@@ -1,6 +1,6 @@
 import { createRule, deleteRule, getRuleOptions, getRules, toggleRule } from '../common/ApiClient'
 import { ControlCenterTheme } from '../common/ControlCenterTheme'
-import { AppBottomNav, SectionTitle, StatusBanner, MetricChip } from '../common/ControlCenterKit'
+import { AppBottomNav, SectionTitle, StatusBanner, MetricChip, StatusPill } from '../common/ControlCenterKit'
 import { UiText } from '../common/UiText'
 import { AutomationRule, RuleOptions, RuleTargetOption, RuleTriggerOption, RuleOperatorOption } from '../model/DeviceModel'
 
@@ -507,9 +507,9 @@ struct RulesPage {
       }
       .width('100%')
       Row() {
-        this.ruleMetricPill(0)
+        StatusPill({ label: '已启用', value: this.enabledCount().toString(), tone: 'success' }).layoutWeight(1)
         Blank().width(10)
-        this.ruleMetricPill(1)
+        StatusPill({ label: '全部规则', value: this.rules.length.toString(), tone: 'neutral' }).layoutWeight(1)
       }
       .width('100%')
       .margin({ top: 14 })
@@ -520,32 +520,6 @@ struct RulesPage {
     .backgroundColor(ControlCenterTheme.surface)
     .border({ width: 1, color: ControlCenterTheme.border })
     .shadow({ radius: 10, color: ControlCenterTheme.shadowSoft, offsetY: 4 })
-  }
-
-  @Builder ruleMetricPill(metric: number) {
-    Row() {
-      Column()
-        .width(8)
-        .height(8)
-        .borderRadius(4)
-        .backgroundColor(metric === 0 ? ControlCenterTheme.accent : ControlCenterTheme.textTertiary)
-      Text(metric === 0 ? '已启用' : '全部规则')
-        .fontSize(13)
-        .fontWeight(FontWeight.Medium)
-        .fontColor(metric === 0 ? '#197D66' : ControlCenterTheme.textSecondary)
-        .margin({ left: 8 })
-      Blank()
-      Text(metric === 0 ? this.enabledCount().toString() : this.rules.length.toString())
-        .fontSize(18)
-        .fontWeight(FontWeight.Bold)
-        .fontColor(metric === 0 ? ControlCenterTheme.accent : ControlCenterTheme.textPrimary)
-    }
-    .layoutWeight(1)
-    .height(52)
-    .padding({ left: 14, right: 14 })
-    .borderRadius(ControlCenterTheme.radiusInner)
-    .backgroundColor(metric === 0 ? ControlCenterTheme.accentSoft : ControlCenterTheme.surfaceMuted)
-    .border({ width: 1, color: metric === 0 ? '#CDEEDB' : ControlCenterTheme.border })
   }
 
   @Builder buildRuleTabs() {

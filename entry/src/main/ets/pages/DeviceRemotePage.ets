@@ -1,6 +1,6 @@
 import { callService, buildEntityId, getAesKey, getDevicesForUi } from '../common/ApiClient'
 import { ControlCenterTheme } from '../common/ControlCenterTheme'
-import { SectionTitle, StatusBanner, MetricChip } from '../common/ControlCenterKit'
+import { SectionTitle, StatusBanner, StatusPill } from '../common/ControlCenterKit'
 import { generateAuthCode } from '../common/CryptoUtil'
 import { UiText } from '../common/UiText'
 import { Device, parseDeviceStatus, CommandParams } from '../model/DeviceModel'
@@ -325,10 +325,10 @@ struct DeviceRemotePage {
 
   secondaryMetricLabel(): string {
     if (this.dt === 'light') return this.lightColorLabel()
-    if (this.dt === 'ac') return this.acMd + ' / ' + this.acFn
+    if (this.dt === 'ac') return this.acModeLabel() + ' / ' + this.fanSpeedLabel()
     if (this.dt === 'door_lock') return this.dlCd > 0 ? this.dlCd.toString() + ' 秒后回锁' : '安全守护中'
     if (this.dt === 'curtain') return this.currentOnline() ? '可精细调节' : '等待恢复在线'
-    if (this.dt === 'humidifier') return '档位 ' + this.huLv.toString()
+    if (this.dt === 'humidifier') return this.humidifierLevelLabel()
     return '智能家居'
   }
 
@@ -339,6 +339,41 @@ struct DeviceRemotePage {
     if (/[\u4e00-\u9fff]/.test(this.ltCl)) return this.ltCl
     if (!this.ltCl) return '未知模式'
     return '其他模式'
+  }
+
+  acModeLabel(): string {
+    if (this.acMd === 'cool') return '制冷'
+    if (this.acMd === 'heat') return '制热'
+    if (this.acMd === 'fan') return '送风'
+    if (this.acMd === 'dry') return '除湿'
+    if (this.acMd === 'auto') return '自动'
+    if (/[^\u0000-\u00ff]/.test(this.acMd)) return this.acMd
+    return '其他模式'
+  }
+
+  fanSpeedLabel(): string {
+    if (this.acFn === 'auto') return '自动'
+    if (this.acFn === 'low') return '低速'
+    if (this.acFn === 'medium') return '中速'
+    if (this.acFn === 'high') return '高速'
+    if (/[^\u0000-\u00ff]/.test(this.acFn)) return this.acFn
+    return '其他风速'
+  }
+
+  humidifierLevelLabel(): string {
+    if (this.huLv === 1) return '低档'
+    if (this.huLv === 2) return '中档'
+    if (this.huLv === 3) return '高档'
+    return this.huLv.toString() + ' 档'
+  }
+
+  acBrandLabel(): string {
+    if (this.acBr === 'gree') return '格力空调'
+    if (this.acBr === 'midea') return '美的空调'
+    if (this.acBr === 'haier') return '海尔空调'
+    if (this.acBr === 'xiaomi' || this.acBr === 'mijia') return '米家空调'
+    if (/[^\u0000-\u00ff]/.test(this.acBr)) return this.acBr
+    return '空调设备'
   }
 
   heroIcon(): string {
@@ -522,9 +557,9 @@ struct DeviceRemotePage {
         .fontColor(ControlCenterTheme.accent)
         .margin({ top: 6 })
       Row() {
-        MetricChip({ label: this.metricCaption(), value: this.primaryMetric(), tone: 'accent' }).layoutWeight(1)
+        StatusPill({ label: this.metricCaption(), value: this.primaryMetric(), tone: 'accent' }).layoutWeight(1)
         Blank().width(10)
-        MetricChip({ label: '房间', value: this.cur() && (this.cur() as Device).room_name ? (this.cur() as Device).room_name : '未分配', tone: 'neutral' }).layoutWeight(1)
+        StatusPill({ label: '房间', value: this.cur() && (this.cur() as Device).room_name ? (this.cur() as Device).room_name : '未分配', tone: 'neutral' }).layoutWeight(1)
       }
       .width('100%')
       .margin({ top: 20 })
@@ -588,22 +623,21 @@ struct DeviceRemotePage {
       .width('100%')
 
       Row() {
-        MetricChip({ label: this.metricCaption(), value: this.primaryMetric(), tone: 'accent' }).layoutWeight(1)
+        StatusPill({ label: this.metricCaption(), value: this.primaryMetric(), tone: 'accent' }).layoutWeight(1)
         Blank().width(10)
-        MetricChip({
-          label: this.cur() && (this.cur() as Device).room_name ? (this.cur() as Device).room_name : '房间信息',
-          value: this.cur() && (this.cur() as Device).brand ? (this.cur() as Device).brand : this.secondaryMetricLabel(),
-          tone: this.heroTone(),
-          inverse: false
+        StatusPill({
+          label: '房间',
+          value: this.cur() && (this.cur() as Device).room_name ? (this.cur() as Device).room_name : '未分配',
+          tone: 'neutral'
         }).layoutWeight(1)
       }
       .width('100%')
       .margin({ top: 18 })
 
       Row() {
-        MetricChip({ label: '室内温度', value: this.roomTemperature(), tone: 'accent' }).layoutWeight(1)
+        StatusPill({ label: '室内温度', value: this.roomTemperature(), tone: 'accent' }).layoutWeight(1)
         Blank().width(10)
-        MetricChip({ label: '室内湿度', value: this.roomHumidity(), tone: 'warning' }).layoutWeight(1)
+        StatusPill({ label: '室内湿度', value: this.roomHumidity(), tone: 'neutral' }).layoutWeight(1)
       }
       .width('100%')
       .margin({ top: 10 })
@@ -687,9 +721,9 @@ struct DeviceRemotePage {
       this.buildPanelHeader('关键操作', '开关与亮度控制', this.ltOn ? '灯光开启中' : '灯光已关闭')
 
       Row() {
-        MetricChip({ label: '供电状态', value: this.ltOn ? '开启' : '关闭', tone: this.ltOn ? 'success' : 'neutral' }).layoutWeight(1)
+        StatusPill({ label: '供电状态', value: this.ltOn ? '开启' : '关闭', tone: this.ltOn ? 'success' : 'neutral' }).layoutWeight(1)
         Blank().width(10)
-        MetricChip({ label: '色温模式', value: this.lightColorLabel(), tone: 'warning' }).layoutWeight(1)
+        StatusPill({ label: '色温模式', value: this.lightColorLabel(), tone: 'neutral' }).layoutWeight(1)
       }
       .width('100%')
       .margin({ top: 12 })
@@ -743,7 +777,7 @@ struct DeviceRemotePage {
 
   @Builder buildAcPanel() {
     Column() {
-      this.buildPanelHeader('温度控制', '突出当前温度设定与主开关', this.acMd)
+      this.buildPanelHeader('温度控制', '突出当前温度设定与主开关', this.acModeLabel())
 
       Column() {
         Row() {
@@ -764,7 +798,7 @@ struct DeviceRemotePage {
               .fontSize(48)
               .fontWeight(FontWeight.Bold)
               .fontColor(ControlCenterTheme.textPrimary)
-            Text(this.acBr || '空调设备')
+            Text(this.acBrandLabel())
               .fontSize(12)
               .fontColor(ControlCenterTheme.textSecondary)
               .margin({ top: 4 })
@@ -787,9 +821,9 @@ struct DeviceRemotePage {
         .padding({ top: 18, bottom: 18 })
 
         Row() {
-          MetricChip({ label: '运行模式', value: this.acMd, tone: 'accent' }).layoutWeight(1)
+          StatusPill({ label: '运行模式', value: this.acModeLabel(), tone: 'accent' }).layoutWeight(1)
           Blank().width(10)
-          MetricChip({ label: '风速', value: this.acFn, tone: 'warning' }).layoutWeight(1)
+          StatusPill({ label: '风速', value: this.fanSpeedLabel(), tone: 'neutral' }).layoutWeight(1)
         }
         .width('100%')
       }
@@ -924,9 +958,9 @@ struct DeviceRemotePage {
       this.buildPanelHeader('湿度控制', '把目标湿度和开关操作放在同一个决策区', this.huTg + '%')
 
       Row() {
-        MetricChip({ label: '供电状态', value: this.huOn ? '开启' : '关闭', tone: this.huOn ? 'success' : 'neutral' }).layoutWeight(1)
+        StatusPill({ label: '供电状态', value: this.huOn ? '开启' : '关闭', tone: this.huOn ? 'success' : 'neutral' }).layoutWeight(1)
         Blank().width(10)
-        MetricChip({ label: '工作档位', value: this.huLv.toString(), tone: 'warning' }).layoutWeight(1)
+        StatusPill({ label: '工作档位', value: this.humidifierLevelLabel(), tone: 'neutral' }).layoutWeight(1)
       }
       .width('100%')
       .margin({ top: 12 })

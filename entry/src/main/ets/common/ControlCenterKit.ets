@@ -245,3 +245,91 @@ export struct MetricChip {
     .alignItems(HorizontalAlign.Start)
   }
 }
+
+@Component
+export struct StatusPill {
+  @Prop label: string = ''
+  @Prop value: string = ''
+  @Prop tone: string = 'neutral'
+
+  private bg(): string {
+    if (this.tone === 'accent' || this.tone === 'success') {
+      return ControlCenterTheme.accentSoft
+    }
+    if (this.tone === 'warning') {
+      return ControlCenterTheme.warningSoft
+    }
+    return ControlCenterTheme.surfaceMuted
+  }
+
+  private dotColor(): string {
+    if (this.tone === 'accent' || this.tone === 'success') {
+      return ControlCenterTheme.accent
+    }
+    if (this.tone === 'warning') {
+      return ControlCenterTheme.warning
+    }
+    return ControlCenterTheme.textTertiary
+  }
+
+  private labelColor(): string {
+    if (this.tone === 'accent' || this.tone === 'success') {
+      return '#197D66'
+    }
+    if (this.tone === 'warning') {
+      return '#9A651D'
+    }
+    return ControlCenterTheme.textSecondary
+  }
+
+  private valueColor(): string {
+    if (this.tone === 'accent' || this.tone === 'success') {
+      return ControlCenterTheme.accent
+    }
+    if (this.tone === 'warning') {
+      return '#9A651D'
+    }
+    return ControlCenterTheme.textPrimary
+  }
+
+  private pillBorderColor(): string {
+    if (this.tone === 'accent' || this.tone === 'success') {
+      return '#CDEEDB'
+    }
+    if (this.tone === 'warning') {
+      return '#F0D8AD'
+    }
+    return ControlCenterTheme.border
+  }
+
+  build() {
+    Row() {
+      Column()
+        .width(8)
+        .height(8)
+        .borderRadius(4)
+        .backgroundColor(this.dotColor())
+      Text(this.label)
+        .fontSize(ControlCenterTheme.assistSize)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(this.labelColor())
+        .margin({ left: 8 })
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+      Blank()
+      Text(this.value)
+        .fontSize(16)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.valueColor())
+        .margin({ left: 8 })
+        .maxLines(1)
+        .textAlign(TextAlign.End)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+    }
+    .height(52)
+    .padding({ left: 14, right: 14 })
+    .borderRadius(ControlCenterTheme.radiusInner)
+    .backgroundColor(this.bg())
+    .border({ width: 1, color: this.pillBorderColor() })
+  }
+}
