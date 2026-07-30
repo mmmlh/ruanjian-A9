@@ -93,7 +93,7 @@ export struct AppTopBar {
   @Prop showBack: boolean = false
   @Prop actionLabel: string = ''
   @Prop actionType: string = 'refresh'
-  @Prop onAction: () => void = () => {}
+  onAction: () => void = () => {}
 
   build() {
     Row() {
@@ -178,7 +178,7 @@ export struct AppTopBar {
 export struct PrimaryButton {
   @Prop label: string = ''
   @Prop isEnabled: boolean = true
-  @Prop onAction: () => void = () => {}
+  onAction: () => void = () => {}
 
   build() {
     Button(this.label)
@@ -199,7 +199,7 @@ export struct PrimaryButton {
 export struct SecondaryButton {
   @Prop label: string = ''
   @Prop isEnabled: boolean = true
-  @Prop onAction: () => void = () => {}
+  onAction: () => void = () => {}
 
   build() {
     Button(this.label)
@@ -223,7 +223,7 @@ export struct EmptyState {
   @Prop detail: string = ''
   @Prop actionLabel: string = ''
   @Prop actionEnabled: boolean = true
-  @Prop onAction: () => void = () => {}
+  onAction: () => void = () => {}
 
   build() {
     Column() {
@@ -269,8 +269,8 @@ export struct ConfirmPanel {
   @Prop confirmLabel: string = '确认'
   @Prop cancelLabel: string = '取消'
   @Prop danger: boolean = true
-  @Prop onCancel: () => void = () => {}
-  @Prop onConfirm: () => void = () => {}
+  onCancel: () => void = () => {}
+  onConfirm: () => void = () => {}
 
   build() {
     Column() {

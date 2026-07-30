@@ -87,7 +87,7 @@ def test_compact_semantic_theme_and_shared_components_exist():
     empty_state = braced_section(kit, "export struct EmptyState")
     assert "@Prop actionLabel: string = ''" in empty_state
     assert "@Prop actionEnabled: boolean = true" in empty_state
-    assert "@Prop onAction: () => void = () => {}" in empty_state
+    assert "onAction: () => void = () => {}" in empty_state
     empty_action = braced_section(empty_state, "if (this.actionLabel)")
     assert "Button(this.actionLabel)" in empty_action
     assert ".height(ControlCenterTheme.tapTarget)" in empty_action
@@ -124,6 +124,17 @@ def test_compact_semantic_theme_and_shared_components_exist():
     assert "export struct AppTopBar" in kit
     assert "export struct EmptyState" in kit
     assert "export struct ConfirmPanel" in kit
+
+
+def test_shared_component_callbacks_are_plain_api20_parameters():
+    kit = (COMMON / "ControlCenterKit.ets").read_text(encoding="utf-8")
+
+    for callback in ["onAction", "onCancel", "onConfirm"]:
+        assert f"@Prop {callback}: () => void" not in kit
+
+    assert kit.count("  onAction: () => void = () => {}") == 4
+    assert kit.count("  onCancel: () => void = () => {}") == 1
+    assert kit.count("  onConfirm: () => void = () => {}") == 1
 
 
 def test_status_banner_stacks_copy_in_a_weighted_column_for_narrow_screens():
