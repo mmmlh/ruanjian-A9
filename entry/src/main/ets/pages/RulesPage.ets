@@ -524,8 +524,8 @@ struct RulesPage {
 
   @Builder buildRuleTabs() {
     Row() {
-      this.ruleTabChip('全部', this.ruleTab === 0, () => { this.ruleTab = 0 })
-      this.ruleTabChip('已启用', this.ruleTab === 1, () => { this.ruleTab = 1 })
+      this.ruleTabChip('全部', 0, () => { this.ruleTab = 0 })
+      this.ruleTabChip('已启用', 1, () => { this.ruleTab = 1 })
     }
     .width('100%')
     .padding(4)
@@ -534,17 +534,20 @@ struct RulesPage {
     .margin({ top: 16 })
   }
 
-  @Builder ruleTabChip(label: string, active: boolean, action: () => void) {
+  @Builder ruleTabChip(label: string, tabIndex: number, action: () => void) {
     Text(label)
       .fontSize(13)
-      .fontWeight(active ? FontWeight.Bold : FontWeight.Medium)
-      .fontColor(active ? ControlCenterTheme.textPrimary : ControlCenterTheme.textSecondary)
+      .fontWeight(this.ruleTab === tabIndex ? FontWeight.Bold : FontWeight.Medium)
+      .fontColor(this.ruleTab === tabIndex ? ControlCenterTheme.accent : ControlCenterTheme.textSecondary)
       .textAlign(TextAlign.Center)
       .layoutWeight(1)
       .height(ControlCenterTheme.tapTarget)
       .padding({ top: 13, bottom: 13 })
       .borderRadius(ControlCenterTheme.radiusPill)
-      .backgroundColor(active ? ControlCenterTheme.surface : '#00000000')
+      .backgroundColor(this.ruleTab === tabIndex ? ControlCenterTheme.surface : '#00000000')
+      .border({ width: this.ruleTab === tabIndex ? 1 : 0, color: this.ruleTab === tabIndex ? ControlCenterTheme.border : '#00000000' })
+      .shadow(this.ruleTab === tabIndex ? { radius: 6, color: ControlCenterTheme.shadowSoft, offsetY: 2 } : { radius: 0, color: '#00000000', offsetY: 0 })
+      .animation({ duration: 180, curve: Curve.EaseOut })
       .onClick(action)
   }
 
@@ -753,15 +756,33 @@ struct RulesPage {
     .scrollBar(BarState.Off)
   }
 
-  @Builder buildChoiceChip(label: string, active: boolean, action: () => void) {
+  isChoiceSelected(group: number, value: string): boolean {
+    if (group === 0) {
+      return this.tr + '|' + this.fl === value
+    }
+    if (group === 1) {
+      return this.op === value
+    }
+    if (group === 2) {
+      return this.vl === value
+    }
+    if (group === 3) {
+      return this.targetId.toString() === value
+    }
+    return this.an === value
+  }
+
+  @Builder buildChoiceChip(label: string, group: number, value: string, action: () => void) {
     Text(label)
       .fontSize(12)
-      .fontWeight(active ? FontWeight.Bold : FontWeight.Medium)
-      .fontColor(active ? ControlCenterTheme.textOnDark : ControlCenterTheme.textSecondary)
+      .fontWeight(this.isChoiceSelected(group, value) ? FontWeight.Bold : FontWeight.Medium)
+      .fontColor(this.isChoiceSelected(group, value) ? ControlCenterTheme.textOnDark : ControlCenterTheme.textSecondary)
       .padding({ left: 14, right: 14, top: 10, bottom: 10 })
+      .height(ControlCenterTheme.tapTarget)
       .borderRadius(ControlCenterTheme.radiusChip)
-      .backgroundColor(active ? ControlCenterTheme.accent : ControlCenterTheme.surfaceTint)
+      .backgroundColor(this.isChoiceSelected(group, value) ? ControlCenterTheme.accent : ControlCenterTheme.surfaceTint)
       .margin({ right: 8, bottom: 8 })
+      .animation({ duration: 180, curve: Curve.EaseOut })
       .onClick(action)
   }
 
@@ -854,7 +875,7 @@ struct RulesPage {
             SectionTitle({ title: '1. 选择触发器', subtitle: '选择哪个房间、哪类传感器负责触发' })
             Flex({ wrap: FlexWrap.Wrap }) {
               ForEach(this.ruleOptions.triggers, (trigger: RuleTriggerOption) => {
-                this.buildChoiceChip(this.triggerLabel(trigger.value) + ' · ' + trigger.room_name, this.tr === trigger.value && this.fl === trigger.field, () => this.pickTrigger(trigger.value, trigger.field))
+                this.buildChoiceChip(this.triggerLabel(trigger.value) + ' · ' + trigger.room_name, 0, trigger.value + '|' + trigger.field, () => this.pickTrigger(trigger.value, trigger.field))
               }, (trigger: RuleTriggerOption) => trigger.value + '-' + trigger.room_name + '-' + trigger.field)
             }
             .width('100%')
@@ -868,7 +889,7 @@ struct RulesPage {
             Scroll() {
               Row() {
                 ForEach(this.availableOperators(), (operator: RuleOperatorOption) => {
-                  this.buildChoiceChip(this.operatorLabel(operator.value), this.op === operator.value, () => { this.op = operator.value })
+                  this.buildChoiceChip(this.operatorLabel(operator.value), 1, operator.value, () => { this.op = operator.value })
                 }, (operator: RuleOperatorOption) => operator.value)
               }
             }
@@ -890,8 +911,8 @@ struct RulesPage {
                 .onChange((value: string) => { this.vl = value })
             } else {
               Row() {
-                this.buildChoiceChip('检测到活动', this.vl === 'true', () => { this.vl = 'true' })
-                this.buildChoiceChip('区域空闲', this.vl === 'false', () => { this.vl = 'false' })
+                this.buildChoiceChip('检测到活动', 2, 'true', () => { this.vl = 'true' })
+                this.buildChoiceChip('区域空闲', 2, 'false', () => { this.vl = 'false' })
               }
               .width('100%')
               .margin({ top: 12 })
@@ -904,7 +925,7 @@ struct RulesPage {
             SectionTitle({ title: '3. 选择执行设备', subtitle: '让动作设备和房间信息更容易阅读' })
             Flex({ wrap: FlexWrap.Wrap }) {
               ForEach(this.ruleOptions.targets, (target: RuleTargetOption) => {
-                this.buildChoiceChip((/[\u4e00-\u9fff]/.test(target.label) ? target.label : this.deviceTypeLabel(target.type)) + ' · ' + target.room_name, this.targetId === target.device_id, () => this.pickTarget(target))
+                this.buildChoiceChip((/[\u4e00-\u9fff]/.test(target.label) ? target.label : this.deviceTypeLabel(target.type)) + ' · ' + target.room_name, 3, target.device_id.toString(), () => this.pickTarget(target))
               }, (target: RuleTargetOption) => target.device_id.toString())
             }
             .width('100%')
@@ -918,7 +939,7 @@ struct RulesPage {
             Scroll() {
               Row() {
                 ForEach(this.availableActions(), (action: string) => {
-                  this.buildChoiceChip(this.actionLabel(action), this.an === action, () => { this.an = action })
+                  this.buildChoiceChip(this.actionLabel(action), 4, action, () => { this.an = action })
                 }, (action: string) => action)
               }
             }

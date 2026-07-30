@@ -256,6 +256,7 @@ struct DeviceManagePage {
             .borderRadius(ControlCenterTheme.radiusChip)
             .backgroundColor(this.bindRoomId === room.id ? ControlCenterTheme.accent : ControlCenterTheme.surfaceMuted)
             .margin({ right: 8 })
+            .animation({ duration: 180, curve: Curve.EaseOut })
           .onClick(() => { this.bindRoomId = room.id })
         }, (room: Room) => room.id.toString())
       }
@@ -355,8 +356,8 @@ struct DeviceManagePage {
 
   @Builder buildDeviceTabs() {
     Row() {
-      this.deviceTab('已绑定', this.viewMode === 0, () => { this.viewMode = 0 })
-      this.deviceTab('待绑定', this.viewMode === 1, () => { this.viewMode = 1 })
+      this.deviceTab('已绑定', 0, () => { this.viewMode = 0 })
+      this.deviceTab('待绑定', 1, () => { this.viewMode = 1 })
     }
     .width('100%')
     .padding(4)
@@ -365,17 +366,20 @@ struct DeviceManagePage {
     .margin({ left: 16, right: 16 })
   }
 
-  @Builder deviceTab(label: string, active: boolean, action: () => void) {
+  @Builder deviceTab(label: string, mode: number, action: () => void) {
     Text(label)
       .fontSize(13)
-      .fontWeight(active ? FontWeight.Bold : FontWeight.Medium)
-      .fontColor(active ? ControlCenterTheme.textPrimary : ControlCenterTheme.textSecondary)
+      .fontWeight(this.viewMode === mode ? FontWeight.Bold : FontWeight.Medium)
+      .fontColor(this.viewMode === mode ? ControlCenterTheme.accent : ControlCenterTheme.textSecondary)
       .textAlign(TextAlign.Center)
       .layoutWeight(1)
       .height(ControlCenterTheme.tapTarget)
       .padding({ top: 13, bottom: 13 })
       .borderRadius(ControlCenterTheme.radiusPill)
-      .backgroundColor(active ? ControlCenterTheme.surface : '#00000000')
+      .backgroundColor(this.viewMode === mode ? ControlCenterTheme.surface : '#00000000')
+      .border({ width: this.viewMode === mode ? 1 : 0, color: this.viewMode === mode ? ControlCenterTheme.border : '#00000000' })
+      .shadow(this.viewMode === mode ? { radius: 6, color: ControlCenterTheme.shadowSoft, offsetY: 2 } : { radius: 0, color: '#00000000', offsetY: 0 })
+      .animation({ duration: 180, curve: Curve.EaseOut })
       .onClick(action)
   }
 

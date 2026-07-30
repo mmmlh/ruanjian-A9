@@ -633,10 +633,12 @@ struct DeviceRemotePage {
               .fontWeight(this.ix === i ? FontWeight.Bold : FontWeight.Medium)
               .fontColor(this.ix === i ? ControlCenterTheme.textOnDark : ControlCenterTheme.textSecondary)
               .padding({ left: 16, right: 16, top: 10, bottom: 10 })
+              .height(ControlCenterTheme.tapTarget)
               .borderRadius(ControlCenterTheme.radiusChip)
               .backgroundColor(this.ix === i ? ControlCenterTheme.accent : ControlCenterTheme.surface)
               .border({ width: this.ix === i ? 0 : 1, color: ControlCenterTheme.border })
               .margin({ right: 8 })
+              .animation({ duration: 180, curve: Curve.EaseOut })
               .onClick(() => this.sl(i))
           }, (device: Device) => device.id.toString())
         }
