@@ -491,3 +491,274 @@ def test_device_add_flow_replaces_long_bound_list_while_open():
     bound_view = braced_section(text, "if (!this.showAddFlow)")
 
     assert "ForEach(this.devices" in bound_view
+
+
+def test_device_remote_uses_shared_header_and_stable_category_marks():
+    text = source("DeviceRemotePage.ets")
+
+    top_bar_call = re.search(r"AppTopBar\(\{(.*?)\}\)", text, re.DOTALL)
+    assert top_bar_call is not None, "DeviceRemotePage.ets must use AppTopBar"
+    top_bar_props = top_bar_call.group(1)
+    assert "title: this.tn()" in top_bar_props
+    assert "showBack: true" in top_bar_props
+    assert "actionLabel: '刷新'" in top_bar_props
+    assert "onAction: () => this.load()" in top_bar_props
+    assert text.count("AppTopBar(") == 1
+    assert "buildTopBar" not in text
+
+    hero_icon = braced_section(text, "heroIcon(): string")
+    for category_mark in [
+        "if (this.dt === 'light') return '灯'",
+        "if (this.dt === 'ac') return '空'",
+        "if (this.dt === 'door_lock') return '锁'",
+        "if (this.dt === 'curtain') return '帘'",
+        "if (this.dt === 'humidifier') return '雾'",
+        "return '设'",
+    ]:
+        assert category_mark in hero_icon
+
+    command = braced_section(text, "async cmd(id: number")
+    command_current = braced_section(text, "async cmdCurrent")
+    slider_command = braced_section(text, "queueSliderCommand")
+    assert "buildEntityId(this.dt, id)" in command
+    assert "await callService(entityId, action, params)" in command
+    assert "await this.load()" in command
+    assert "!current || this.commandBusy" in command_current
+    assert "this.cmd(deviceId, action, params)" in slider_command
+    for panel in ["buildLightPanel", "buildAcPanel", "buildLockPanel", "buildCurtainPanel", "buildHumidifierPanel"]:
+        assert f"this.{panel}()" in text
+    assert "设备离线，指令将尝试下发" in text
+
+
+def test_data_monitor_uses_shared_header_stable_marks_and_serialized_refresh():
+    text = source("DataMonitorPage.ets")
+
+    top_bar_call = re.search(r"AppTopBar\(\{(.*?)\}\)", text, re.DOTALL)
+    assert top_bar_call is not None, "DataMonitorPage.ets must use AppTopBar"
+    top_bar_props = top_bar_call.group(1)
+    assert "title: '数据监测'" in top_bar_props
+    assert "showBack: true" in top_bar_props
+    assert "actionLabel: '刷新'" in top_bar_props
+    assert "onAction: () => this.refresh()" in top_bar_props
+    assert text.count("AppTopBar(") == 1
+    assert "buildTopBar" not in text
+
+    sensor_mark = braced_section(text, "ic(deviceType: string): string")
+    assert "return '温'" in sensor_mark
+    assert "return '湿'" in sensor_mark
+    assert "return '人'" in sensor_mark
+
+    refresh = braced_section(text, "async refresh()")
+    assert "@State liveRefreshing: boolean = false" in text
+    assert "let requestedTab = this.tab" in refresh
+    for guard in [
+        "if (requestedTab === 0 && this.liveRefreshing)",
+        "if (requestedTab === 1 && this.historyLoading)",
+        "if (requestedTab === 2 && this.logsLoading)",
+    ]:
+        assert guard in refresh
+        assert refresh.index(guard) < refresh.index("this.errorMessage = ''")
+    assert "if (requestedTab === 1)" in refresh
+    assert "this.historyLoading = true" in refresh
+    assert "if (requestedTab === 2)" in refresh
+    assert "this.logsLoading = true" in refresh
+    assert "this.liveRefreshing = true" in refresh
+    assert "this.loading = true" not in refresh
+    for reset_branch in [
+        "if (requestedTab === 0)",
+        "this.liveRefreshing = false",
+        "else if (requestedTab === 1)",
+        "this.historyLoading = false",
+        "this.logsLoading = false",
+    ]:
+        assert reset_branch in refresh
+
+    for api_call in [
+        "getDevicesForUi()", "getSensorHistory(undefined, 60, this.historyStart())",
+        "getDeviceLogs(undefined, 40)",
+    ]:
+        assert api_call in text
+
+
+def test_data_monitor_refresh_errors_are_owned_by_the_request_tab():
+    text = source("DataMonitorPage.ets")
+    refresh = braced_section(text, "async refresh()")
+    clear_error = braced_section(text, "clearTabError(tab: number)")
+    set_error = braced_section(text, "setTabError(tab: number")
+    current_error = braced_section(text, "currentTabError(): string")
+    feedback = braced_section(text, "@Builder buildFeedback()")
+
+    for state in ["liveError", "historyError", "logError"]:
+        assert f"@State {state}: string = ''" in text
+        assert f"this.{state} = ''" in clear_error
+        assert f"this.{state} = message" in set_error
+        assert f"return this.{state}" in current_error
+
+    assert "this.clearTabError(requestedTab)" in refresh
+    assert "this.setTabError(requestedTab, localizeMessage(" in refresh
+    assert "this.errorMessage = localizeMessage" not in refresh
+    assert "if (this.currentTabError())" in feedback
+    assert "Text(this.currentTabError())" in feedback
+    assert "else if (this.errorMessage)" in feedback
+    assert "Text(this.errorMessage)" in feedback
+
+
+def test_rules_use_single_shared_add_action_and_overlay_confirmation():
+    text = source("RulesPage.ets")
+    build = braced_section(text, "build()")
+
+    top_bar_call = re.search(r"AppTopBar\(\{(.*?)\}\)", text, re.DOTALL)
+    assert top_bar_call is not None, "RulesPage.ets must use AppTopBar"
+    top_bar_props = top_bar_call.group(1)
+    assert "title: '自动化规则'" in top_bar_props
+    assert "actionLabel: '新增规则'" in top_bar_props
+    assert "actionType: 'add'" in top_bar_props
+    assert "this.dlg = true" in top_bar_props
+    assert "showBack: true" not in top_bar_props
+    assert text.count("AppTopBar(") == 1
+    assert text.count("this.dlg = true") == 1
+    assert "buildTopBar" not in text
+    assert "Text('+')" not in text
+    assert "@Builder buildHero()" not in text
+    assert "buildRecommendedScenes" not in text
+
+    assert "Stack() {" in build
+    assert "AppBottomNav({ active: 'automation' })" in build
+    assert build.index("AppBottomNav({ active: 'automation' })") < build.index("if (this.dlg)")
+    assert "if (!this.dlg)" not in build
+    assert "ControlCenterTheme.overlay" in text
+
+    delete_flow = braced_section(text, "async dD")
+    assert "@State pendingDeleteId: number = -1" in text
+    assert "@State deletingId: number = -1" in text
+    assert "if (this.deletingId >= 0)" in delete_flow
+    assert delete_flow.index("if (this.deletingId >= 0)") < delete_flow.index("this.deletingId = id")
+    assert delete_flow.index("this.pendingDeleteId = -1") < delete_flow.index("await deleteRule(id)")
+    assert "this.deletingId = -1" in delete_flow
+
+    rule_list = braced_section(text, "@Builder buildRuleList()")
+    delete_button = section_between(
+        rule_list,
+        "Button(this.deletingId === rule.id ? '删除中...' : '删除')",
+        ".onClick(() => { this.pendingDeleteId = rule.id })",
+    )
+    assert ".height(ControlCenterTheme.tapTarget)" in delete_button
+    assert ".enabled(this.deletingId < 0)" in delete_button
+    assert "onCancel: () => { this.pendingDeleteId = -1 }" in build
+    assert "onConfirm: () => this.dD(this.pendingDeleteId)" in build
+
+
+def test_rules_dialog_keeps_creation_errors_visible():
+    text = source("RulesPage.ets")
+    build = braced_section(text, "build()")
+    dialog = braced_section(text, "@Builder buildDialog()")
+
+    assert "if (this.errorMessage && !this.dlg)" in build
+    assert "if (this.errorMessage)" in dialog
+    dialog_error = braced_section(dialog, "if (this.errorMessage)")
+    assert "StatusBanner({" in dialog_error
+    assert "message: this.errorMessage" in dialog_error
+    assert "tone: 'danger'" in dialog_error
+    error_index = dialog.index("if (this.errorMessage)")
+    assert dialog.index("if (this.showParams())") < error_index
+    assert error_index < dialog.index("Button('取消')")
+    assert dialog.count("message: this.errorMessage") == 1
+
+
+def test_rules_creation_is_serialized_and_dialog_controls_respect_busy_state():
+    text = source("RulesPage.ets")
+    create_flow = braced_section(text, "async dC()")
+    dialog = braced_section(text, "@Builder buildDialog()")
+
+    assert "@State creating: boolean = false" in text
+    assert "if (this.creating)" in create_flow
+    assert create_flow.index("if (this.creating)") < create_flow.index("this.errorMessage = ''")
+    assert create_flow.index("if (this.tr !== 'pir_sensor')") < create_flow.index("this.creating = true")
+    assert create_flow.index("this.creating = true") < create_flow.index("await createRule(")
+    assert "finally" in create_flow
+    assert "this.creating = false" in create_flow
+
+    close_button = section_between(dialog, "Button('关闭')", ".onClick(() => { this.dlg = false })")
+    cancel_button = section_between(dialog, "Button('取消')", ".onClick(() => { this.dlg = false })")
+    create_button = section_between(
+        dialog,
+        "Button(this.creating ? '创建中...' : '创建规则')",
+        ".onClick(() => this.dC())",
+    )
+    for control in [close_button, cancel_button, create_button]:
+        assert ".enabled(!this.creating)" in control
+
+
+def test_rules_toggle_requests_are_serialized_and_controls_are_disabled_while_busy():
+    text = source("RulesPage.ets")
+    toggle_flow = braced_section(text, "async dT")
+    rule_list = braced_section(text, "@Builder buildRuleList()")
+
+    assert "@State togglingId: number = -1" in text
+    assert "if (this.togglingId >= 0)" in toggle_flow
+    assert toggle_flow.index("if (this.togglingId >= 0)") < toggle_flow.index("this.togglingId = id")
+    assert toggle_flow.index("this.togglingId = id") < toggle_flow.index("await toggleRule(id)")
+    assert toggle_flow.index("await toggleRule(id)") < toggle_flow.index("this.rules = await getRules()")
+    assert "finally" in toggle_flow
+    assert "this.togglingId = -1" in toggle_flow
+
+    toggle_control = section_between(
+        rule_list,
+        "Toggle({ type: ToggleType.Switch, isOn: rule.enabled === 1 })",
+        ".onChange((isOn: boolean) => { this.dT(rule.id) })",
+    )
+    assert ".enabled(this.togglingId < 0)" in toggle_control
+
+
+def test_profile_uses_single_confirmed_logout_action_in_stack_overlay():
+    text = source("ProfilePage.ets")
+    build = braced_section(text, "build()")
+
+    assert "AppTopBar({ title: '我的' })" in text
+    assert text.count("AppTopBar(") == 1
+    assert "buildTopBar" not in text
+    assert "showBack: true" not in text
+    assert "getRouter().back()" not in text
+    assert "退出当前账号并登录其他账号" not in text
+    assert text.count("'退出登录'") == 1
+
+    assert "@State confirmLogout: boolean = false" in text
+    assert "@State loggingOut: boolean = false" in text
+    logout_flow = braced_section(text, "async doOut")
+    assert "if (this.loggingOut)" in logout_flow
+    assert logout_flow.index("if (this.loggingOut)") < logout_flow.index("this.loggingOut = true")
+    assert logout_flow.index("this.confirmLogout = false") < logout_flow.index("await logout()")
+    assert "finally" in logout_flow
+    assert "this.loggingOut = false" in logout_flow
+
+    session = braced_section(text, "@Builder buildSessionCard()")
+    logout_button = section_between(
+        session,
+        "Button(this.loggingOut ? '退出中...' : '退出登录')",
+        ".onClick(() => { this.confirmLogout = true })",
+    )
+    assert ".height(ControlCenterTheme.tapTarget)" in logout_button
+    assert ".enabled(!this.loggingOut)" in logout_button
+    assert ".onClick(() => this.doOut())" not in text
+
+    assert "Stack() {" in build
+    assert "AppBottomNav({ active: 'profile' })" in build
+    assert build.index("AppBottomNav({ active: 'profile' })") < build.index("if (this.confirmLogout)")
+    assert "onCancel: () => { this.confirmLogout = false }" in build
+    assert "onConfirm: () => this.doOut()" in build
+    assert "ControlCenterTheme.overlay" in build
+
+
+def test_profile_feedback_stays_fixed_below_the_top_bar():
+    text = source("ProfilePage.ets")
+    build = braced_section(text, "build()")
+    scroll = braced_section(build, "Scroll()")
+
+    top_bar_index = build.index("AppTopBar({ title: '我的' })")
+    error_index = build.index("if (this.pageErr)")
+    success_index = build.index("if (this.pageOk)")
+    scroll_index = build.index("Scroll()")
+    assert top_bar_index < error_index < scroll_index
+    assert top_bar_index < success_index < scroll_index
+    assert "this.buildGlobalError" not in scroll
+    assert "this.buildGlobalSuccess" not in scroll

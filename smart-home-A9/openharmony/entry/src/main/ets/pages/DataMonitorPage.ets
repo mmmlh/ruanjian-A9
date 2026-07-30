@@ -2,6 +2,7 @@ import { getDevicesForUi, getSensorHistory, getDeviceLogs } from '../common/ApiC
 import { Device, parseDeviceStatus, SensorDataItem, LogItem } from '../model/DeviceModel'
 import { UiText } from '../common/UiText'
 import { ControlCenterTheme } from '../common/ControlCenterTheme'
+import { AppTopBar } from '../common/ControlCenterKit'
 
 const PAGE_BG: string = ControlCenterTheme.pageBg
 const HERO_BG: string = ControlCenterTheme.surface
@@ -34,9 +35,13 @@ struct DataMonitorPage {
   @State curId: number = 0
   @State historyHours: number = 24
   @State loading: boolean = false
+  @State liveRefreshing: boolean = false
   @State historyLoading: boolean = false
   @State logsLoading: boolean = false
   @State errorMessage: string = ''
+  @State liveError: string = ''
+  @State historyError: string = ''
+  @State logError: string = ''
 
   aboutToAppear(): void {
     this.load()
@@ -67,25 +72,72 @@ struct DataMonitorPage {
     this.sensors = sensors
   }
 
+  clearTabError(tab: number): void {
+    if (tab === 0) {
+      this.liveError = ''
+    } else if (tab === 1) {
+      this.historyError = ''
+    } else {
+      this.logError = ''
+    }
+  }
+
+  setTabError(tab: number, message: string): void {
+    if (tab === 0) {
+      this.liveError = message
+    } else if (tab === 1) {
+      this.historyError = message
+    } else {
+      this.logError = message
+    }
+  }
+
+  currentTabError(): string {
+    if (this.tab === 0) {
+      return this.liveError
+    }
+    if (this.tab === 1) {
+      return this.historyError
+    }
+    return this.logError
+  }
+
   async refresh(): Promise<void> {
+    let requestedTab = this.tab
+    if (requestedTab === 0 && this.liveRefreshing) {
+      return
+    }
+    if (requestedTab === 1 && this.historyLoading) {
+      return
+    }
+    if (requestedTab === 2 && this.logsLoading) {
+      return
+    }
     this.errorMessage = ''
+    this.clearTabError(requestedTab)
     try {
-      if (this.tab === 1) {
+      if (requestedTab === 1) {
         this.historyLoading = true
         this.sdata = await getSensorHistory(this.curId > 0 ? this.curId : undefined, 60, this.historyStart())
         return
       }
-      if (this.tab === 2) {
+      if (requestedTab === 2) {
         this.logsLoading = true
         this.logs = await getDeviceLogs(this.curId > 0 ? this.curId : undefined, 40)
         return
       }
+      this.liveRefreshing = true
       await this.loadSensors()
     } catch (err) {
-      this.errorMessage = localizeMessage((err as Error).message, '刷新监测数据失败')
+      this.setTabError(requestedTab, localizeMessage((err as Error).message, '刷新监测数据失败'))
     } finally {
-      this.historyLoading = false
-      this.logsLoading = false
+      if (requestedTab === 0) {
+        this.liveRefreshing = false
+      } else if (requestedTab === 1) {
+        this.historyLoading = false
+      } else {
+        this.logsLoading = false
+      }
     }
   }
 
@@ -103,9 +155,9 @@ struct DataMonitorPage {
   }
 
   ic(deviceType: string): string {
-    if (deviceType === 'temperature' || deviceType === 'temperature_sensor') return '\uD83C\uDF21\uFE0F'
-    if (deviceType === 'humidity' || deviceType === 'humidity_sensor') return '\uD83D\uDCA7'
-    return '\uD83D\uDC63'
+    if (deviceType === 'temperature' || deviceType === 'temperature_sensor') return '温'
+    if (deviceType === 'humidity' || deviceType === 'humidity_sensor') return '湿'
+    return '人'
   }
 
   dn(id: number): string {
@@ -276,12 +328,15 @@ struct DataMonitorPage {
 
   build() {
     Column() {
+      AppTopBar({ title: '数据监测', showBack: true, actionLabel: '刷新', onAction: () => this.refresh() })
+        .padding({ left: ControlCenterTheme.gutter, right: ControlCenterTheme.gutter,
+          top: ControlCenterTheme.spaceMd, bottom: ControlCenterTheme.spaceSm })
+
       if (this.loading) {
         this.buildLoading()
       } else {
         Scroll() {
           Column() {
-            this.buildTopBar()
             this.buildFeedback()
             this.buildHero()
             this.buildTabs()
@@ -304,18 +359,17 @@ struct DataMonitorPage {
     .backgroundColor(PAGE_BG)
   }
 
-  @Builder buildTopBar() {
-    Row() {
-      Text('\u2190').fontSize(20).fontColor(TEXT_PRIMARY).padding(8).onClick(() => this.getUIContext().getRouter().back())
-      Text('数据监测').fontSize(18).fontWeight(FontWeight.Bold).fontColor(TEXT_PRIMARY).margin({ left: 6 })
-      Blank()
-      Text('刷新').fontSize(12).fontColor(PRIMARY).fontWeight(FontWeight.Bold).onClick(() => this.refresh())
-    }
-    .width('100%')
-  }
-
   @Builder buildFeedback() {
-    if (this.errorMessage) {
+    if (this.currentTabError()) {
+      Text(this.currentTabError())
+        .fontSize(13)
+        .fontColor('#A04444')
+        .padding({ left: 14, right: 14, top: 10, bottom: 10 })
+        .borderRadius(14)
+        .backgroundColor('#FBE3E3')
+        .width('100%')
+        .margin({ top: 14 })
+    } else if (this.errorMessage) {
       Text(this.errorMessage)
         .fontSize(13)
         .fontColor('#A04444')
@@ -573,7 +627,7 @@ struct DataMonitorPage {
       Text('正在加载监测工作台...').fontSize(13).fontColor(TEXT_SECONDARY).margin({ top: 14 })
     }
     .width('100%')
-    .height('100%')
+    .layoutWeight(1)
     .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Center)
   }

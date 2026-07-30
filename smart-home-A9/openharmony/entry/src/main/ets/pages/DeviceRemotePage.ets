@@ -1,6 +1,6 @@
 import { callService, buildEntityId, getAesKey, getDevicesForUi } from '../common/ApiClient'
 import { ControlCenterTheme } from '../common/ControlCenterTheme'
-import { SectionTitle, StatusBanner, MetricChip } from '../common/ControlCenterKit'
+import { AppTopBar, SectionTitle, StatusBanner, MetricChip } from '../common/ControlCenterKit'
 import { generateAuthCode } from '../common/CryptoUtil'
 import { UiText } from '../common/UiText'
 import { Device, parseDeviceStatus, CommandParams } from '../model/DeviceModel'
@@ -342,12 +342,12 @@ struct DeviceRemotePage {
   }
 
   heroIcon(): string {
-    if (this.dt === 'light') return '\uD83D\uDCA1'
-    if (this.dt === 'ac') return '\u2744\uFE0F'
-    if (this.dt === 'door_lock') return this.dlLk ? '\uD83D\uDD12' : '\uD83D\uDD13'
-    if (this.dt === 'curtain') return '\uD83E\uDE9B'
-    if (this.dt === 'humidifier') return '\uD83D\uDCA8'
-    return '\uD83D\uDD0C'
+    if (this.dt === 'light') return '灯'
+    if (this.dt === 'ac') return '空'
+    if (this.dt === 'door_lock') return '锁'
+    if (this.dt === 'curtain') return '帘'
+    if (this.dt === 'humidifier') return '雾'
+    return '设'
   }
 
   heroTone(): string {
@@ -412,6 +412,10 @@ struct DeviceRemotePage {
 
   build() {
     Column() {
+      AppTopBar({ title: this.tn(), showBack: true, actionLabel: '刷新', onAction: () => this.load() })
+        .padding({ left: ControlCenterTheme.gutter, right: ControlCenterTheme.gutter,
+          top: ControlCenterTheme.spaceMd, bottom: ControlCenterTheme.spaceSm })
+
       if (this.loading) {
         this.buildLoading()
       } else if (this.ds.length === 0) {
@@ -419,7 +423,6 @@ struct DeviceRemotePage {
       } else {
         Scroll() {
           Column() {
-            this.buildTopBar()
             this.buildFeedback()
             this.buildControlHero()
             this.buildDeviceSwitcher()
@@ -444,40 +447,6 @@ struct DeviceRemotePage {
     .width('100%')
     .height('100%')
     .backgroundColor(ControlCenterTheme.pageBg)
-  }
-
-  @Builder buildTopBar() {
-    Row() {
-      Row() {
-        Text('\u2190')
-          .fontSize(18)
-          .fontColor(ControlCenterTheme.textPrimary)
-      }
-      .width(38)
-      .height(38)
-      .borderRadius(14)
-      .backgroundColor(ControlCenterTheme.surface)
-      .justifyContent(FlexAlign.Center)
-      .alignItems(VerticalAlign.Center)
-      .shadow({ radius: 12, color: ControlCenterTheme.shadowSoft, offsetY: 4 })
-      .onClick(() => this.getUIContext().getRouter().back())
-
-      Text(this.tn())
-        .fontSize(19)
-        .fontWeight(FontWeight.Bold)
-        .fontColor(ControlCenterTheme.textPrimary)
-        .margin({ left: 10 })
-      Blank()
-      Text('刷新')
-        .fontSize(12)
-        .fontWeight(FontWeight.Bold)
-        .fontColor(ControlCenterTheme.accent)
-        .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-        .borderRadius(ControlCenterTheme.radiusPill)
-        .backgroundColor(ControlCenterTheme.accentSoft)
-        .onClick(() => this.load())
-    }
-    .width('100%')
   }
 
   @Builder buildFeedback() {
@@ -816,7 +785,7 @@ struct DeviceRemotePage {
       this.buildPanelHeader('门锁状态', '把当前安全状态和关键动作放在最前面', this.dlLk ? '安全中' : '已解锁')
 
       Column() {
-        Text(this.dlLk ? '\uD83D\uDD12' : '\uD83D\uDD13').fontSize(76)
+        Text('锁').fontSize(48).fontWeight(FontWeight.Bold).fontColor(ControlCenterTheme.accent)
         Text(this.dlLk ? '门锁当前处于上锁状态' : '门锁当前处于解锁状态')
           .fontSize(14)
           .fontColor(this.dlLk ? ControlCenterTheme.accent : ControlCenterTheme.warning)
@@ -850,7 +819,7 @@ struct DeviceRemotePage {
       this.buildPanelHeader('窗帘控制', '开合状态 + 快捷操作 + 精细滑动控制', this.ctPs + '%')
 
       Column() {
-        Text('\uD83E\uDE9B').fontSize(60)
+        Text('帘').fontSize(42).fontWeight(FontWeight.Bold).fontColor(ControlCenterTheme.accent)
         Text(this.ctPs + '%')
           .fontSize(42)
           .fontWeight(FontWeight.Bold)
@@ -982,7 +951,7 @@ struct DeviceRemotePage {
         .margin({ top: 14 })
     }
     .width('100%')
-    .height('100%')
+    .layoutWeight(1)
     .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Center)
   }
@@ -1009,7 +978,7 @@ struct DeviceRemotePage {
         .onClick(() => this.getUIContext().getRouter().back())
     }
     .width('100%')
-    .height('100%')
+    .layoutWeight(1)
     .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Center)
     .backgroundColor(ControlCenterTheme.pageBg)

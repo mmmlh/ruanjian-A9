@@ -2,7 +2,7 @@ import { getMe, changePassword, logout } from '../common/ApiClient'
 import { UiText } from '../common/UiText'
 import { UserInfo } from '../model/DeviceModel'
 import { ControlCenterTheme } from '../common/ControlCenterTheme'
-import { AppBottomNav } from '../common/ControlCenterKit'
+import { AppTopBar, AppBottomNav, ConfirmPanel } from '../common/ControlCenterKit'
 
 const PAGE_BG: string = ControlCenterTheme.pageBg
 const HERO_BG: string = ControlCenterTheme.surface
@@ -33,6 +33,8 @@ struct ProfilePage {
   @State pageOk: string = ''
   @State pwdErr: string = ''
   @State changing: boolean = false
+  @State confirmLogout: boolean = false
+  @State loggingOut: boolean = false
 
   aboutToAppear(): void {
     this.ld()
@@ -80,6 +82,11 @@ struct ProfilePage {
   }
 
   async doOut(): Promise<void> {
+    if (this.loggingOut) {
+      return
+    }
+    this.loggingOut = true
+    this.confirmLogout = false
     this.pageErr = ''
     this.pageOk = ''
     try {
@@ -87,6 +94,8 @@ struct ProfilePage {
       this.getUIContext().getRouter().replaceUrl({ url: 'pages/LoginPage' })
     } catch (err) {
       this.pageErr = localizeMessage((err as Error).message, '退出登录失败')
+    } finally {
+      this.loggingOut = false
     }
   }
 
@@ -96,42 +105,67 @@ struct ProfilePage {
   }
 
   build() {
-    Column() {
-      if (this.loading) {
-        this.buildLoading()
-      } else {
-        Scroll() {
+    Stack() {
+      Column() {
+        AppTopBar({ title: '我的' })
+          .padding({ left: ControlCenterTheme.gutter, right: ControlCenterTheme.gutter,
+            top: ControlCenterTheme.spaceMd, bottom: ControlCenterTheme.spaceSm })
+
+        if (this.pageErr || this.pageOk) {
           Column() {
-            this.buildTopBar()
             if (this.pageErr) {
               this.buildGlobalError(this.pageErr)
             }
             if (this.pageOk) {
               this.buildGlobalSuccess(this.pageOk)
             }
-            this.buildHero()
-            this.buildAccountCard()
-            this.buildSecurityCard()
-            this.buildSessionCard()
           }
-          .padding({ left: 16, right: 16, top: 16, bottom: 24 })
+          .width('100%')
+          .padding({ left: ControlCenterTheme.gutter, right: ControlCenterTheme.gutter })
         }
-        .layoutWeight(1)
-        .scrollBar(BarState.Off)
+
+        if (this.loading) {
+          this.buildLoading()
+        } else {
+          Scroll() {
+            Column() {
+              this.buildHero()
+              this.buildAccountCard()
+              this.buildSecurityCard()
+              this.buildSessionCard()
+            }
+            .padding({ left: 16, right: 16, top: 16, bottom: 24 })
+          }
+          .layoutWeight(1)
+          .scrollBar(BarState.Off)
+        }
+        AppBottomNav({ active: 'profile' })
       }
-      AppBottomNav({ active: 'profile' })
+      .width('100%')
+      .height('100%')
+
+      if (this.confirmLogout) {
+        Column() {
+          ConfirmPanel({
+            title: '退出登录？',
+            detail: '退出后需要重新登录才能继续管理家庭设备。',
+            confirmLabel: '确认退出',
+            cancelLabel: '取消',
+            onCancel: () => { this.confirmLogout = false },
+            onConfirm: () => this.doOut()
+          })
+        }
+        .width('100%')
+        .height('100%')
+        .padding(ControlCenterTheme.gutter)
+        .justifyContent(FlexAlign.Center)
+        .alignItems(HorizontalAlign.Center)
+        .backgroundColor(ControlCenterTheme.overlay)
+      }
     }
     .width('100%')
     .height('100%')
     .backgroundColor(PAGE_BG)
-  }
-
-  @Builder buildTopBar() {
-    Row() {
-      Text('\u2190').fontSize(20).fontColor(TEXT_PRIMARY).padding(8).onClick(() => this.getUIContext().getRouter().back())
-      Text('个人中心').fontSize(18).fontWeight(FontWeight.Bold).fontColor(TEXT_PRIMARY).margin({ left: 6 })
-    }
-    .width('100%')
   }
 
   @Builder buildGlobalError(message: string) {
@@ -159,7 +193,7 @@ struct ProfilePage {
   @Builder buildHero() {
     Column() {
       Column() {
-        Text('\uD83D\uDC64').fontSize(44)
+        Text('我').fontSize(28).fontWeight(FontWeight.Bold).fontColor(PRIMARY)
       }
       .width(72)
       .height(72)
@@ -272,27 +306,17 @@ struct ProfilePage {
     Column() {
       this.cardTitle('会话管理', '管理当前登录会话')
 
-      Button('退出当前账号并登录其他账号')
+      Button(this.loggingOut ? '退出中...' : '退出登录')
         .type(ButtonType.Capsule)
         .width('100%')
-        .height(46)
-        .fontSize(14)
-        .backgroundColor('#F4F7FA')
-        .fontColor(TEXT_PRIMARY)
-        .borderRadius(14)
-        .margin({ top: 14 })
-        .onClick(() => this.doOut())
-
-      Button('退出登录')
-        .type(ButtonType.Capsule)
-        .width('100%')
-        .height(46)
+        .height(ControlCenterTheme.tapTarget)
         .fontSize(14)
         .fontWeight(FontWeight.Bold)
         .backgroundColor(DANGER)
         .borderRadius(14)
-        .margin({ top: 10 })
-        .onClick(() => this.doOut())
+        .enabled(!this.loggingOut)
+        .margin({ top: 14 })
+        .onClick(() => { this.confirmLogout = true })
     }
     .width('100%')
     .padding(16)
@@ -326,7 +350,7 @@ struct ProfilePage {
       Text('正在加载个人信息...').fontSize(13).fontColor(TEXT_SECONDARY).margin({ top: 14 })
     }
     .width('100%')
-    .height('100%')
+    .layoutWeight(1)
     .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Center)
   }

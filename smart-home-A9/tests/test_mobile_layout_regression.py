@@ -81,7 +81,11 @@ def test_registration_page_uses_the_shared_visual_system_and_scrolls_with_keyboa
     assert "ControlCenterTheme.controlHeight" in source
 
 
-def test_profile_account_switch_label_matches_the_logout_based_flow():
+def test_profile_exposes_one_confirmed_logout_action():
     source = PROFILE_PAGE.read_text(encoding="utf-8")
 
-    assert "Button('退出当前账号并登录其他账号')" in source
+    assert "退出当前账号并登录其他账号" not in source
+    assert source.count("'退出登录'") == 1
+    assert "Button(this.loggingOut ? '退出中...' : '退出登录')" in source
+    assert ".onClick(() => { this.confirmLogout = true })" in source
+    assert ".onClick(() => this.doOut())" not in source

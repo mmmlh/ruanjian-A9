@@ -1,6 +1,6 @@
 import { createRule, deleteRule, getRuleOptions, getRules, toggleRule } from '../common/ApiClient'
 import { ControlCenterTheme } from '../common/ControlCenterTheme'
-import { AppBottomNav, SectionTitle, StatusBanner, MetricChip } from '../common/ControlCenterKit'
+import { AppTopBar, AppBottomNav, SectionTitle, StatusBanner, MetricChip, ConfirmPanel } from '../common/ControlCenterKit'
 import { UiText } from '../common/UiText'
 import { AutomationRule, RuleOptions, RuleTargetOption, RuleTriggerOption, RuleOperatorOption } from '../model/DeviceModel'
 
@@ -39,6 +39,10 @@ struct RulesPage {
   @State ruleOptions: RuleOptions = new RuleOptions()
   @State errorMessage: string = ''
   @State ruleTab: number = 0
+  @State pendingDeleteId: number = -1
+  @State deletingId: number = -1
+  @State creating: boolean = false
+  @State togglingId: number = -1
 
   aboutToAppear(): void {
     this.ld()
@@ -78,20 +82,35 @@ struct RulesPage {
   }
 
   async dT(id: number): Promise<void> {
+    if (this.togglingId >= 0) {
+      return
+    }
+    this.togglingId = id
+    this.errorMessage = ''
     try {
       await toggleRule(id)
       this.rules = await getRules()
     } catch (err) {
       this.errorMessage = localizeMessage((err as Error).message, '切换规则状态失败')
+    } finally {
+      this.togglingId = -1
     }
   }
 
   async dD(id: number): Promise<void> {
+    if (this.deletingId >= 0) {
+      return
+    }
+    this.deletingId = id
+    this.pendingDeleteId = -1
+    this.errorMessage = ''
     try {
       await deleteRule(id)
       this.rules = await getRules()
     } catch (err) {
       this.errorMessage = localizeMessage((err as Error).message, '删除规则失败')
+    } finally {
+      this.deletingId = -1
     }
   }
 
@@ -142,6 +161,9 @@ struct RulesPage {
   }
 
   async dC(): Promise<void> {
+    if (this.creating) {
+      return
+    }
     this.errorMessage = ''
     if (!this.nm.trim()) {
       this.errorMessage = '规则名称不能为空'
@@ -166,6 +188,7 @@ struct RulesPage {
         return
       }
     }
+    this.creating = true
     try {
       await createRule(this.nm.trim(), this.buildConditionJson(), this.buildActionJson())
       this.resetDialog()
@@ -173,6 +196,8 @@ struct RulesPage {
       this.rules = await getRules()
     } catch (err) {
       this.errorMessage = localizeMessage((err as Error).message, '创建规则失败')
+    } finally {
+      this.creating = false
     }
   }
 
@@ -366,84 +391,73 @@ struct RulesPage {
   }
 
   build() {
-    Column() {
-      this.buildTopBar()
-
-      if (this.errorMessage) {
-        StatusBanner({
-          message: this.errorMessage,
-          detail: '请检查规则内容或稍后重试',
-          tone: 'danger'
-        }).margin({ top: 12, left: 16, right: 16 })
-      }
-
-      if (this.loading && this.rules.length === 0) {
-        this.buildLoading()
-      } else if (this.rules.length === 0) {
-        this.buildEmpty()
-      } else {
-        Scroll() {
-          Column() {
-            this.buildMijiaRulesHero()
-            this.buildRuleTabs()
-            this.buildRuleList()
-            this.buildRecommendedScenes()
+    Stack() {
+      Column() {
+        AppTopBar({ title: '自动化规则', actionLabel: '新增规则', actionType: 'add',
+          onAction: () => {
+            this.errorMessage = ''
+            this.dlg = true
           }
-          .padding({ left: 16, right: 16, top: 16, bottom: 28 })
-        }
-        .layoutWeight(1)
-        .scrollBar(BarState.Off)
-      }
+        })
+          .padding({ left: ControlCenterTheme.gutter, right: ControlCenterTheme.gutter,
+            top: ControlCenterTheme.spaceMd, bottom: ControlCenterTheme.spaceSm })
 
-      if (!this.dlg) {
+        if (this.errorMessage && !this.dlg) {
+          StatusBanner({
+            message: this.errorMessage,
+            detail: '请检查规则内容或稍后重试',
+            tone: 'danger'
+          }).margin({ top: 12, left: 16, right: 16 })
+        }
+
+        if (this.loading && this.rules.length === 0) {
+          this.buildLoading()
+        } else if (this.rules.length === 0) {
+          this.buildEmpty()
+        } else {
+          Scroll() {
+            Column() {
+              this.buildMijiaRulesHero()
+              this.buildRuleTabs()
+              this.buildRuleList()
+            }
+            .padding({ left: 16, right: 16, top: 16, bottom: 28 })
+          }
+          .layoutWeight(1)
+          .scrollBar(BarState.Off)
+        }
+
         AppBottomNav({ active: 'automation' })
       }
+      .width('100%')
+      .height('100%')
 
       if (this.dlg) {
         this.buildDialog()
+      }
+
+      if (this.pendingDeleteId > 0) {
+        Column() {
+          ConfirmPanel({
+            title: '删除规则？',
+            detail: '删除后无法恢复，已有设备状态不会改变。',
+            confirmLabel: '确认删除',
+            cancelLabel: '取消',
+            onCancel: () => { this.pendingDeleteId = -1 },
+            onConfirm: () => this.dD(this.pendingDeleteId)
+          })
+        }
+        .width('100%')
+        .height('100%')
+        .padding(ControlCenterTheme.gutter)
+        .justifyContent(FlexAlign.Center)
+        .alignItems(HorizontalAlign.Center)
+        .backgroundColor(ControlCenterTheme.overlay)
       }
     }
     .width('100%')
     .height('100%')
     .backgroundColor(ControlCenterTheme.pageBg)
-  }
-
-  @Builder buildTopBar() {
-    Row() {
-      Row() {
-        Text('\u2190')
-          .fontSize(18)
-          .fontColor(ControlCenterTheme.textPrimary)
-      }
-      .width(38)
-      .height(38)
-      .borderRadius(14)
-      .backgroundColor(ControlCenterTheme.surface)
-      .justifyContent(FlexAlign.Center)
-      .alignItems(VerticalAlign.Center)
-      .shadow({ radius: 12, color: ControlCenterTheme.shadowSoft, offsetY: 4 })
-      .onClick(() => this.getUIContext().getRouter().back())
-
-      Text('自动化规则')
-        .fontSize(19)
-        .fontWeight(FontWeight.Bold)
-        .fontColor(ControlCenterTheme.textPrimary)
-        .margin({ left: 10 })
-      Blank()
-      Text('新增规则')
-        .fontSize(12)
-        .fontWeight(FontWeight.Bold)
-        .fontColor(ControlCenterTheme.accent)
-        .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-        .borderRadius(ControlCenterTheme.radiusPill)
-        .backgroundColor(ControlCenterTheme.accentSoft)
-        .onClick(() => {
-          this.errorMessage = ''
-          this.dlg = true
-        })
-    }
-    .width('100%')
-    .padding({ left: 16, right: 16, top: 16, bottom: 0 })
   }
 
   filteredRules(): AutomationRule[] {
@@ -474,16 +488,6 @@ struct RulesPage {
         }
         .alignItems(HorizontalAlign.Start)
         .layoutWeight(1)
-        Text('+')
-          .fontSize(28)
-          .fontColor('#FFFFFF')
-          .width(44)
-          .height(44)
-          .textAlign(TextAlign.Center)
-          .padding({ top: 5 })
-          .borderRadius(22)
-          .backgroundColor(ControlCenterTheme.accent)
-          .onClick(() => { this.dlg = true })
       }
       .width('100%')
       Row() {
@@ -527,61 +531,11 @@ struct RulesPage {
       .onClick(action)
   }
 
-  @Builder buildHero() {
-    Column() {
-      Row() {
-        Column() {
-          Text('规则中控面板')
-            .fontSize(20)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(ControlCenterTheme.textPrimary)
-          Text('把传感器条件和设备动作组合成可读、可信的自动化。')
-            .fontSize(12)
-            .fontColor(ControlCenterTheme.textSecondary)
-            .margin({ top: 5 })
-        }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start)
-
-        Text(this.rules.length.toString() + ' 条')
-          .fontSize(12)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(ControlCenterTheme.accent)
-          .padding({ left: 10, right: 10, top: 6, bottom: 6 })
-          .borderRadius(ControlCenterTheme.radiusPill)
-          .backgroundColor(ControlCenterTheme.accentSoft)
-      }
-      .width('100%')
-
-      Row() {
-        MetricChip({ label: '启用中', value: this.enabledCount().toString(), tone: 'success' }).layoutWeight(1)
-        Blank().width(10)
-        MetricChip({ label: '总规则', value: this.rules.length.toString(), tone: 'accent' }).layoutWeight(1)
-        Blank().width(10)
-        MetricChip({ label: '可选设备', value: this.ruleOptions.targets.length.toString(), tone: 'warning' }).layoutWeight(1)
-      }
-      .width('100%')
-      .margin({ top: 18 })
-
-      StatusBanner({
-        message: '规则列表已经做成摘要式展示',
-        detail: '便于答辩演示时快速解释逻辑',
-        tone: 'success'
-      }).margin({ top: 18 })
-    }
-    .width('100%')
-    .padding(20)
-    .borderRadius(ControlCenterTheme.radiusHero)
-    .backgroundColor(ControlCenterTheme.surface)
-    .border({ width: 1, color: ControlCenterTheme.border })
-    .shadow({ radius: 18, color: ControlCenterTheme.shadowSoft, offsetY: 8 })
-  }
-
   @Builder buildRuleList() {
     Column() {
       SectionTitle({
         title: '已创建规则',
-        subtitle: '每条规则都使用“如果 / 则”摘要，避免阅读长 JSON',
+        subtitle: '按“如果 / 则”查看触发条件与执行动作',
         trailing: this.enabledCount().toString() + ' 条启用'
       })
 
@@ -620,16 +574,19 @@ struct RulesPage {
               Row() {
                 Toggle({ type: ToggleType.Switch, isOn: rule.enabled === 1 })
                   .selectedColor(ControlCenterTheme.accent)
+                  .enabled(this.togglingId < 0)
                   .onChange((isOn: boolean) => { this.dT(rule.id) })
                 Blank()
-                Text('删除')
-                  .fontSize(11)
+                Button(this.deletingId === rule.id ? '删除中...' : '删除')
+                  .height(ControlCenterTheme.tapTarget)
+                  .fontSize(12)
                   .fontWeight(FontWeight.Bold)
                   .fontColor('#A14D4D')
-                  .padding({ left: 10, right: 10, top: 6, bottom: 6 })
-                  .borderRadius(ControlCenterTheme.radiusPill)
+                  .padding({ left: ControlCenterTheme.spaceMd, right: ControlCenterTheme.spaceMd })
+                  .borderRadius(ControlCenterTheme.radiusInner)
                   .backgroundColor(ControlCenterTheme.dangerSoft)
-                  .onClick(() => this.dD(rule.id))
+                  .enabled(this.deletingId < 0)
+                  .onClick(() => { this.pendingDeleteId = rule.id })
               }
               .width('100%')
               .margin({ top: 14 })
@@ -646,38 +603,6 @@ struct RulesPage {
       .width('100%')
       .margin({ top: 12 })
       .layoutWeight(1)
-    }
-    .width('100%')
-    .margin({ top: 20 })
-  }
-
-  @Builder buildRecommendedScenes() {
-    Column() {
-      Text('推荐场景')
-        .fontSize(17)
-        .fontWeight(FontWeight.Bold)
-        .fontColor(ControlCenterTheme.textPrimary)
-      Column() {
-        Text('空气干燥时自动加湿')
-          .fontSize(15)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(ControlCenterTheme.textPrimary)
-        Text('根据湿度传感器读数启动加湿器')
-          .fontSize(12)
-          .fontColor(ControlCenterTheme.textSecondary)
-          .margin({ top: 7 })
-        Text('一键创建 ›')
-          .fontSize(12)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(ControlCenterTheme.accent)
-          .margin({ top: 12 })
-      }
-      .width('100%')
-      .padding(16)
-      .borderRadius(ControlCenterTheme.radiusCard)
-      .backgroundColor(ControlCenterTheme.accentSoft)
-      .margin({ top: 12 })
-      .onClick(() => { this.dlg = true })
     }
     .width('100%')
     .margin({ top: 20 })
@@ -700,30 +625,15 @@ struct RulesPage {
   @Builder buildEmpty() {
     Scroll() {
       Column() {
-        this.buildHero()
         Column() {
           Text('还没有创建自动化规则')
             .fontSize(17)
             .fontWeight(FontWeight.Bold)
             .fontColor(ControlCenterTheme.textPrimary)
-          Text('先建立一条“如果 / 则”规则，让控制终端更像完整产品。')
+          Text('使用右上角的新增规则入口开始配置自动化。')
             .fontSize(12)
             .fontColor(ControlCenterTheme.textSecondary)
             .margin({ top: 6 })
-          Button('创建第一条规则')
-            .type(ButtonType.Capsule)
-            .width('100%')
-            .height(48)
-            .fontSize(15)
-            .fontWeight(FontWeight.Bold)
-            .backgroundColor(ControlCenterTheme.accent)
-            .fontColor('#FFFFFF')
-            .borderRadius(16)
-            .margin({ top: 18 })
-            .onClick(() => {
-              this.errorMessage = ''
-              this.dlg = true
-            })
         }
         .width('100%')
         .padding(20)
@@ -811,10 +721,13 @@ struct RulesPage {
               .fontWeight(FontWeight.Bold)
               .fontColor(ControlCenterTheme.textPrimary)
             Blank()
-            Text('关闭')
+            Button('关闭')
+              .height(ControlCenterTheme.tapTarget)
               .fontSize(12)
               .fontWeight(FontWeight.Bold)
               .fontColor(ControlCenterTheme.textSecondary)
+              .backgroundColor('#00000000')
+              .enabled(!this.creating)
               .onClick(() => { this.dlg = false })
           }
           .width('100%')
@@ -935,6 +848,14 @@ struct RulesPage {
             .margin({ top: 18 })
           }
 
+          if (this.errorMessage) {
+            StatusBanner({
+              message: this.errorMessage,
+              detail: '请检查规则内容或稍后重试',
+              tone: 'danger'
+            }).margin({ top: 12 })
+          }
+
           Row() {
             Button('取消')
               .type(ButtonType.Capsule)
@@ -945,9 +866,10 @@ struct RulesPage {
               .backgroundColor(ControlCenterTheme.surfaceTint)
               .fontColor(ControlCenterTheme.textSecondary)
               .borderRadius(16)
+              .enabled(!this.creating)
               .onClick(() => { this.dlg = false })
             Blank().width(10)
-            Button('创建规则')
+            Button(this.creating ? '创建中...' : '创建规则')
               .type(ButtonType.Capsule)
               .layoutWeight(1)
               .height(46)
@@ -956,6 +878,7 @@ struct RulesPage {
               .backgroundColor(ControlCenterTheme.accent)
               .fontColor('#FFFFFF')
               .borderRadius(16)
+              .enabled(!this.creating)
               .onClick(() => this.dC())
           }
           .width('100%')
