@@ -699,23 +699,75 @@ struct DeviceRemotePage {
     }
   }
 
-  @Builder buildPanelHeader(title: string, subtitle: string, trailing: string = '') {
-    SectionTitle({ title: title, subtitle: subtitle, trailing: trailing })
+  primaryActionLabel(): string {
+    if (this.dt === 'light') return this.ltOn ? '关闭灯光' : '开启灯光'
+    if (this.dt === 'ac') return this.acOn ? '关闭空调' : '开启空调'
+    if (this.dt === 'door_lock') return this.dlLk ? '解锁门锁' : '重新上锁'
+    if (this.dt === 'humidifier') return this.huOn ? '关闭加湿器' : '开启加湿器'
+    return '执行操作'
   }
 
-  @Builder buildPrimaryButton(label: string, color: string, action: () => void) {
-    Button(this.commandBusy ? '执行中...' : label)
+  primaryActionColor(): string {
+    if (this.dt === 'light') return this.ltOn ? ControlCenterTheme.danger : ControlCenterTheme.accent
+    if (this.dt === 'ac') return this.acOn ? ControlCenterTheme.danger : ControlCenterTheme.accent
+    if (this.dt === 'door_lock') return this.dlLk ? ControlCenterTheme.warning : ControlCenterTheme.accent
+    if (this.dt === 'humidifier') return this.huOn ? ControlCenterTheme.danger : ControlCenterTheme.accent
+    return ControlCenterTheme.accent
+  }
+
+  runPrimaryAction(): void {
+    if (this.dt === 'light') {
+      if (this.ltOn) {
+        this.cmdCurrent('off')
+      } else {
+        let params = new CommandParams()
+        params.brightness = this.ltBr
+        params.color = this.ltCl
+        this.cmdCurrent('on', params)
+      }
+      return
+    }
+    if (this.dt === 'ac') {
+      if (this.acOn) {
+        this.cmdCurrent('off')
+      } else {
+        let params = new CommandParams()
+        params.mode = this.acMd
+        params.temp = this.acTp
+        params.fan = this.acFn
+        this.cmdCurrent('on', params)
+      }
+      return
+    }
+    if (this.dt === 'door_lock') {
+      this.doDl()
+      return
+    }
+    if (this.dt === 'humidifier') {
+      if (this.huOn) {
+        this.cmdCurrent('off')
+      } else {
+        let params = new CommandParams()
+        params.level = this.huLv
+        params.target_humidity = this.huTg
+        this.cmdCurrent('on', params)
+      }
+    }
+  }
+
+  @Builder buildPrimaryButton() {
+    Button(this.commandBusy ? '执行中...' : this.primaryActionLabel())
       .type(ButtonType.Capsule)
       .width('100%')
       .height(52)
       .fontSize(16)
       .fontWeight(FontWeight.Bold)
-      .backgroundColor(color)
+      .backgroundColor(this.primaryActionColor())
       .fontColor('#FFFFFF')
       .borderRadius(18)
       .enabled(!this.commandBusy)
       .margin({ top: 14 })
-      .onClick(action)
+      .onClick(() => this.runPrimaryAction())
   }
 
   @Builder buildGhostButton(label: string, bg: string, fg: string, action: () => void) {
@@ -734,7 +786,11 @@ struct DeviceRemotePage {
 
   @Builder buildLightPanel() {
     Column() {
-      this.buildPanelHeader('关键操作', '开关与亮度控制', this.ltOn ? '灯光开启中' : '灯光已关闭')
+      SectionTitle({
+        title: '关键操作',
+        subtitle: '开关与亮度控制',
+        trailing: this.ltOn ? '灯光开启中' : '灯光已关闭'
+      })
 
       Row() {
         StatusPill({ label: '供电状态', value: this.ltOn ? '开启' : '关闭', tone: this.ltOn ? 'success' : 'neutral' }).layoutWeight(1)
@@ -744,19 +800,10 @@ struct DeviceRemotePage {
       .width('100%')
       .margin({ top: 12 })
 
-      this.buildPrimaryButton(this.ltOn ? '关闭灯光' : '开启灯光', this.ltOn ? ControlCenterTheme.danger : ControlCenterTheme.accent, () => {
-        if (this.ltOn) {
-          this.cmdCurrent('off')
-        } else {
-          let params = new CommandParams()
-          params.brightness = this.ltBr
-          params.color = this.ltCl
-          this.cmdCurrent('on', params)
-        }
-      })
+      this.buildPrimaryButton()
 
       Column() {
-        this.buildPanelHeader('亮度微调', '拖动滑块调整当前灯光', this.ltBr + '%')
+        SectionTitle({ title: '亮度微调', subtitle: '拖动滑块调整当前灯光', trailing: this.ltBr + '%' })
         Row() {
           Text('0%').fontSize(ControlCenterTheme.assistSize).fontColor(ControlCenterTheme.textSecondary)
           Blank()
@@ -793,7 +840,7 @@ struct DeviceRemotePage {
 
   @Builder buildAcPanel() {
     Column() {
-      this.buildPanelHeader('温度控制', '突出当前温度设定与主开关', this.acModeLabel())
+      SectionTitle({ title: '温度控制', subtitle: '突出当前温度设定与主开关', trailing: this.acModeLabel() })
 
       Column() {
         Row() {
@@ -850,17 +897,7 @@ struct DeviceRemotePage {
       .shadow({ radius: 18, color: ControlCenterTheme.shadowSoft, offsetY: 8 })
       .margin({ top: 12 })
 
-      this.buildPrimaryButton(this.acOn ? '关闭空调' : '开启空调', this.acOn ? ControlCenterTheme.danger : ControlCenterTheme.accent, () => {
-        if (this.acOn) {
-          this.cmdCurrent('off')
-        } else {
-          let p = new CommandParams()
-          p.mode = this.acMd
-          p.temp = this.acTp
-          p.fan = this.acFn
-          this.cmdCurrent('on', p)
-        }
-      })
+      this.buildPrimaryButton()
     }
     .width('100%')
     .margin({ top: 18 })
@@ -868,7 +905,11 @@ struct DeviceRemotePage {
 
   @Builder buildLockPanel() {
     Column() {
-      this.buildPanelHeader('门锁状态', '把当前安全状态和关键动作放在最前面', this.dlLk ? '安全中' : '已解锁')
+      SectionTitle({
+        title: '门锁状态',
+        subtitle: '把当前安全状态和关键动作放在最前面',
+        trailing: this.dlLk ? '安全中' : '已解锁'
+      })
 
       Column() {
         Text(this.dlLk ? '\uD83D\uDD12' : '\uD83D\uDD13').fontSize(76)
@@ -886,7 +927,7 @@ struct DeviceRemotePage {
       .alignItems(HorizontalAlign.Center)
       .margin({ top: 12 })
 
-      this.buildPrimaryButton(this.dlLk ? '解锁门锁' : '重新上锁', this.dlLk ? ControlCenterTheme.warning : ControlCenterTheme.accent, () => this.doDl())
+      this.buildPrimaryButton()
 
       if (this.dlSh) {
         StatusBanner({
@@ -902,7 +943,7 @@ struct DeviceRemotePage {
 
   @Builder buildCurtainPanel() {
     Column() {
-      this.buildPanelHeader('窗帘控制', '开合状态 + 快捷操作 + 精细滑动控制', this.ctPs + '%')
+      SectionTitle({ title: '窗帘控制', subtitle: '开合状态 + 快捷操作 + 精细滑动控制', trailing: this.ctPs + '%' })
 
       Column() {
         Text('\uD83E\uDE9B').fontSize(60)
@@ -934,7 +975,7 @@ struct DeviceRemotePage {
       .margin({ top: 14 })
 
       Column() {
-        this.buildPanelHeader('位置微调', '滑动调整到目标开合度', this.ctPs + '%')
+        SectionTitle({ title: '位置微调', subtitle: '滑动调整到目标开合度', trailing: this.ctPs + '%' })
         Row() {
           Text('关闭').fontSize(ControlCenterTheme.assistSize).fontColor(ControlCenterTheme.textSecondary)
           Blank()
@@ -971,7 +1012,7 @@ struct DeviceRemotePage {
 
   @Builder buildHumidifierPanel() {
     Column() {
-      this.buildPanelHeader('湿度控制', '把目标湿度和开关操作放在同一个决策区', this.huTg + '%')
+      SectionTitle({ title: '湿度控制', subtitle: '把目标湿度和开关操作放在同一个决策区', trailing: this.huTg + '%' })
 
       Row() {
         StatusPill({ label: '供电状态', value: this.huOn ? '开启' : '关闭', tone: this.huOn ? 'success' : 'neutral' }).layoutWeight(1)
@@ -981,19 +1022,10 @@ struct DeviceRemotePage {
       .width('100%')
       .margin({ top: 12 })
 
-      this.buildPrimaryButton(this.huOn ? '关闭加湿器' : '开启加湿器', this.huOn ? ControlCenterTheme.danger : ControlCenterTheme.accent, () => {
-        if (this.huOn) {
-          this.cmdCurrent('off')
-        } else {
-          let p = new CommandParams()
-          p.level = this.huLv
-          p.target_humidity = this.huTg
-          this.cmdCurrent('on', p)
-        }
-      })
+      this.buildPrimaryButton()
 
       Column() {
-        this.buildPanelHeader('目标湿度', '拖动滑块调整运行目标', this.huTg + '%')
+        SectionTitle({ title: '目标湿度', subtitle: '拖动滑块调整运行目标', trailing: this.huTg + '%' })
         Row() {
           Text('35%').fontSize(ControlCenterTheme.assistSize).fontColor(ControlCenterTheme.textSecondary)
           Blank()
