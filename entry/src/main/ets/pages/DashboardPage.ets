@@ -743,14 +743,18 @@ struct DashboardPage {
       }
       .alignItems(HorizontalAlign.Start)
       .layoutWeight(1)
-      SymbolGlyph($r('sys.symbol.house'))
-        .fontSize(28)
-        .fontColor(['#FFFFFF'])
-        .width(56)
-        .height(56)
-        .borderRadius(28)
-        .backgroundColor(ControlCenterTheme.accent)
-        .onClick(() => this.rf())
+      Row() {
+        SymbolGlyph($r('sys.symbol.house'))
+          .fontSize(28)
+          .fontColor(['#FFFFFF'])
+      }
+      .width(56)
+      .height(56)
+      .justifyContent(FlexAlign.Center)
+      .alignItems(VerticalAlign.Center)
+      .borderRadius(28)
+      .backgroundColor(ControlCenterTheme.accent)
+      .onClick(() => this.rf())
     }
     .width('100%')
     .padding(18)
