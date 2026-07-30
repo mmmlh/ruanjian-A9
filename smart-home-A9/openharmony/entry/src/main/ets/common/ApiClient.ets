@@ -1,7 +1,8 @@
 import http from '@ohos.net.http'
 import { extractAesKey } from './TokenUtil'
 import { aesEncrypt } from './CryptoUtil'
-import { DEFAULT_SERVER_URL, loadServerUrl, saveServerUrl, saveAuthData, loadAuthData, clearAuthData } from './SecureStorage'
+import { SERVER_BASE_URL } from './ServerConfig'
+import { saveAuthData, loadAuthData, clearAuthData } from './SecureStorage'
 import { UiText } from './UiText'
 import {
   Room,
@@ -22,8 +23,6 @@ import {
   RuleTargetOption,
   ServiceCallResult
 } from '../model/DeviceModel'
-
-let baseUrl: string = ''
 
 class LoginRequest {
   username: string = ''
@@ -250,20 +249,10 @@ export async function initApiClient(): Promise<void> {
     cachedToken = saved[0]
     cachedAesKey = saved[1]
   }
-  let serverUrl = await loadServerUrl()
-  baseUrl = serverUrl || DEFAULT_SERVER_URL
-}
-
-export function setBaseUrl(url: string): void {
-  if (!url.startsWith('http')) {
-    url = 'http://' + url
-  }
-  baseUrl = url
-  saveServerUrl(url)
 }
 
 export function getBaseUrl(): string {
-  return baseUrl
+  return SERVER_BASE_URL
 }
 
 export async function setToken(token: string): Promise<void> {
@@ -282,7 +271,7 @@ export function getAesKey(): string {
 
 async function request<T>(method: http.RequestMethod, path: string, data?: Object): Promise<T> {
   let httpRequest = http.createHttp()
-  let url = `${baseUrl}${path}`
+  let url = `${SERVER_BASE_URL}${path}`
 
   let headers: Record<string, string> = {
     'Content-Type': 'application/json'

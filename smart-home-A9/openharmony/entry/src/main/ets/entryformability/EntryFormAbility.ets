@@ -5,7 +5,8 @@ import formInfo from '@ohos.app.form.formInfo'
 import formProvider from '@ohos.app.form.formProvider'
 import hilog from '@ohos.hilog'
 import http from '@ohos.net.http'
-import { DEFAULT_SERVER_URL, initPreferences, loadServerUrl } from '../common/SecureStorage'
+import { SERVER_BASE_URL } from '../common/ServerConfig'
+import { initPreferences } from '../common/SecureStorage'
 
 const TAG = 'SmartHomeForm'
 const DOMAIN = 0x0000
@@ -45,9 +46,7 @@ async function updateFormSafely(formId: string, data: Record<string, Object>): P
 }
 
 async function resolveWidgetUrl(): Promise<string> {
-  let savedBaseUrl = await loadServerUrl()
-  let baseUrl = savedBaseUrl || DEFAULT_SERVER_URL
-  return `${baseUrl}/api/devices`
+  return `${SERVER_BASE_URL}/api/devices`
 }
 
 async function fetchDeviceData(): Promise<Record<string, Object>> {

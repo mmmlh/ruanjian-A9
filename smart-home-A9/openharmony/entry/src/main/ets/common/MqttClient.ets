@@ -1,6 +1,7 @@
 import { BusinessError } from '@ohos.base'
 import webSocket from '@ohos.net.webSocket'
-import { getBaseUrl, getToken } from './ApiClient'
+import { SERVER_WEBSOCKET_URL } from './ServerConfig'
+import { getToken } from './ApiClient'
 
 let ws: webSocket.WebSocket | null = null
 let messageCallback: ((msg: string) => void) | null = null
@@ -19,10 +20,7 @@ function _doConnect(): void {
   isConnecting = true
 
   let token = getToken()
-  let base = getBaseUrl()
-  let wsProtocol = base.startsWith('https') ? 'wss://' : 'ws://'
-  let host = base.replace('https://', '').replace('http://', '')
-  let url = `${wsProtocol}${host}/ws/realtime?token=${token}`
+  let url = `${SERVER_WEBSOCKET_URL}/ws/realtime?token=${token}`
 
   ws = webSocket.createWebSocket()
   ws!.on('open', () => {

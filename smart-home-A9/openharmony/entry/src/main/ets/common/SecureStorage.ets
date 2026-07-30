@@ -1,10 +1,8 @@
 import dataPreferences from '@ohos.data.preferences'
 
-export const DEFAULT_SERVER_URL = 'http://8.162.10.179:8000'
 const PREFS_NAME = 'smart_home_auth'
 const KEY_TOKEN = 'auth_token'
 const KEY_AES_KEY = 'aes_key'
-const KEY_SERVER_URL = 'server_url'
 
 let prefsInstance: dataPreferences.Preferences | null = null
 let prefsInitPromise: Promise<void> | null = null
@@ -52,27 +50,6 @@ export async function loadAuthData(): Promise<string[]> {
     return [token, aesKey]
   } catch (e) {
     return ['', '']
-  }
-}
-
-export async function saveServerUrl(url: string): Promise<void> {
-  await ensurePreferencesReady()
-  if (!prefsInstance) return
-  try {
-    await prefsInstance.put(KEY_SERVER_URL, url)
-    await prefsInstance.flush()
-  } catch (e) {
-    console.error('saveServerUrl failed', e)
-  }
-}
-
-export async function loadServerUrl(): Promise<string> {
-  await ensurePreferencesReady()
-  if (!prefsInstance) return ''
-  try {
-    return await prefsInstance.get(KEY_SERVER_URL, '') as string
-  } catch (e) {
-    return ''
   }
 }
 
