@@ -278,7 +278,15 @@ struct DashboardPage {
       this.lastSynced = this.syncTime()
       this.lastSyncedAt = new Date().getTime()
     } catch (err) {
-      this.errorMessage = localizeMessage((err as Error).message, '加载全屋总览失败')
+      let message = localizeMessage((err as Error).message, '加载全屋总览失败')
+      if (this.lastSyncedAt === 0) {
+        this.errorMessage = message
+      } else {
+        try {
+          this.getUIContext().getPromptAction().showToast({ message: message })
+        } catch (_) {
+        }
+      }
     } finally {
       this.loading = false
     }
@@ -581,7 +589,7 @@ struct DashboardPage {
 
   build() {
     Column() {
-      if (this.loading) {
+      if (this.loading && this.lastSyncedAt === 0) {
         this.buildLoading()
       } else {
         Scroll() {
@@ -744,9 +752,16 @@ struct DashboardPage {
       .alignItems(HorizontalAlign.Start)
       .layoutWeight(1)
       Row() {
-        SymbolGlyph($r('sys.symbol.house'))
-          .fontSize(28)
-          .fontColor(['#FFFFFF'])
+        if (this.loading) {
+          LoadingProgress()
+            .width(24)
+            .height(24)
+            .color('#FFFFFF')
+        } else {
+          SymbolGlyph($r('sys.symbol.house'))
+            .fontSize(28)
+            .fontColor(['#FFFFFF'])
+        }
       }
       .width(56)
       .height(56)
@@ -754,6 +769,7 @@ struct DashboardPage {
       .alignItems(VerticalAlign.Center)
       .borderRadius(28)
       .backgroundColor(ControlCenterTheme.accent)
+      .enabled(!this.loading)
       .onClick(() => this.rf())
     }
     .width('100%')

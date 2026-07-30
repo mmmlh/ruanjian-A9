@@ -124,6 +124,7 @@ struct DeviceManagePage {
   @State err: string = ''
   @State ok: string = ''
   @State viewMode: number = 0
+  @State initialLoadComplete: boolean = false
   @State deleteTargetId: number = -1
   @State deleteTargetName: string = ''
 
@@ -142,9 +143,18 @@ struct DeviceManagePage {
       }
       await this.scanCandidates(false)
     } catch (err) {
-      this.err = localizeMessage((err as Error).message, '加载设备列表失败')
+      let message = localizeMessage((err as Error).message, '加载设备列表失败')
+      if (!this.initialLoadComplete) {
+        this.err = message
+      } else {
+        try {
+          this.getUIContext().getPromptAction().showToast({ message: message })
+        } catch (_) {
+        }
+      }
     } finally {
       this.loading = false
+      this.initialLoadComplete = true
     }
   }
 
@@ -318,7 +328,7 @@ struct DeviceManagePage {
           .margin({ top: 10, left: 16, right: 16 })
       }
 
-      if (this.loading) {
+      if (this.loading && !this.initialLoadComplete) {
         Column() {
           LoadingProgress().width(28).height(28).color(ControlCenterTheme.accent)
         }

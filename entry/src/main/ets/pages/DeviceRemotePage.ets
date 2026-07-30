@@ -189,7 +189,15 @@ struct DeviceRemotePage {
       this.pendingDeviceId = 0
       this.sl(next)
     } catch (err) {
-      this.errorMessage = localizeMessage((err as Error).message, '加载设备控制页失败')
+      let message = localizeMessage((err as Error).message, '加载设备控制页失败')
+      if (this.ds.length === 0) {
+        this.errorMessage = message
+      } else {
+        try {
+          this.getUIContext().getPromptAction().showToast({ message: message })
+        } catch (_) {
+        }
+      }
     } finally {
       this.loading = false
     }
@@ -447,7 +455,7 @@ struct DeviceRemotePage {
 
   build() {
     Column() {
-      if (this.loading) {
+      if (this.loading && this.ds.length === 0) {
         this.buildLoading()
       } else if (this.ds.length === 0) {
         this.buildEmpty()
@@ -505,14 +513,22 @@ struct DeviceRemotePage {
         .margin({ left: 10 })
       Blank()
       Button() {
-        SymbolGlyph($r('sys.symbol.repeat_1'))
-          .fontSize(20)
-          .fontColor([ControlCenterTheme.accent])
+        if (this.loading) {
+          LoadingProgress()
+            .width(20)
+            .height(20)
+            .color(ControlCenterTheme.accent)
+        } else {
+          SymbolGlyph($r('sys.symbol.repeat_1'))
+            .fontSize(20)
+            .fontColor([ControlCenterTheme.accent])
+        }
       }
         .width(ControlCenterTheme.tapTarget)
         .height(ControlCenterTheme.tapTarget)
         .borderRadius(ControlCenterTheme.radiusInner)
         .backgroundColor(ControlCenterTheme.accentSoft)
+        .enabled(!this.loading)
         .accessibilityText('刷新设备状态')
         .onClick(() => this.load())
     }

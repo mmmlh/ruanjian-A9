@@ -83,7 +83,11 @@ struct DataMonitorPage {
       }
       await this.loadSensors()
     } catch (err) {
-      this.errorMessage = localizeMessage((err as Error).message, '刷新监测数据失败')
+      let message = localizeMessage((err as Error).message, '刷新监测数据失败')
+      try {
+        this.getUIContext().getPromptAction().showToast({ message: message })
+      } catch (_) {
+      }
     } finally {
       this.historyLoading = false
       this.logsLoading = false
@@ -280,12 +284,12 @@ struct DataMonitorPage {
       if (this.loading) {
         this.buildLoading()
       } else {
-        Scroll() {
-          Column() {
-            this.buildTopBar()
-            this.buildFeedback()
-            this.buildHero()
-            this.buildTabs()
+        Column() {
+          this.buildTopBar()
+          this.buildFeedback()
+          this.buildHero()
+          this.buildTabs()
+          Scroll() {
             if (this.tab === 0) {
               this.buildLivePanel()
             } else if (this.tab === 1) {
@@ -294,10 +298,10 @@ struct DataMonitorPage {
               this.buildLogsPanel()
             }
           }
-          .padding({ left: 16, right: 16, top: 16, bottom: 24 })
+          .layoutWeight(1)
+          .scrollBar(BarState.Off)
         }
-        .layoutWeight(1)
-        .scrollBar(BarState.Off)
+        .padding({ left: 16, right: 16, top: 16, bottom: 24 })
       }
     }
     .width('100%')
@@ -323,13 +327,21 @@ struct DataMonitorPage {
         .margin({ left: 10 })
       Blank()
       Button() {
-        SymbolGlyph($r('sys.symbol.repeat_1'))
-          .fontSize(20)
-          .fontColor([PRIMARY])
+        if (this.historyLoading || this.logsLoading) {
+          LoadingProgress()
+            .width(20)
+            .height(20)
+            .color(PRIMARY)
+        } else {
+          SymbolGlyph($r('sys.symbol.repeat_1'))
+            .fontSize(20)
+            .fontColor([PRIMARY])
+        }
       }
         .width(ControlCenterTheme.tapTarget)
         .height(ControlCenterTheme.tapTarget)
         .backgroundColor(ControlCenterTheme.accentSoft)
+        .enabled(!this.historyLoading && !this.logsLoading)
         .accessibilityText('刷新数据监测')
         .onClick(() => this.refresh())
     }
@@ -433,81 +445,75 @@ struct DataMonitorPage {
   }
 
   @Builder buildHistoryPanel() {
-    if (this.historyLoading) {
-      this.buildSectionLoading('正在刷新历史记录...')
-    } else {
-      Column() {
-        Scroll() {
-          Row() {
-            this.filterChip('全部传感器', 0, () => { this.curId = 0; this.refresh() })
-            ForEach(this.sensors, (device: Device) => {
-              this.filterChip(device.name, device.id, () => { this.curId = device.id; this.refresh() })
-            }, (device: Device) => device.id.toString())
-          }
-        }
-        .scrollable(ScrollDirection.Horizontal)
-        .scrollBar(BarState.Off)
-        .width('100%')
-
+    Column() {
+      Scroll() {
         Row() {
-          this.rangeChip('24小时', 24, () => { this.historyHours = 24; this.refresh() })
-          this.rangeChip('7天', 168, () => { this.historyHours = 168; this.refresh() })
-        }
-        .width('100%')
-        .margin({ top: 12 })
-
-        if (this.sdata.length === 0) {
-          this.buildEmptyState('暂无历史记录', '历史传感器记录会显示在这里')
-        } else {
-          Column() {
-            Text(this.historySummary())
-              .fontSize(12)
-              .fontColor(TEXT_SECONDARY)
-              .width('100%')
-              .margin({ top: 14, bottom: 2 })
-            if (this.historyInsight()) {
-              Text(this.historyInsight())
-                .fontSize(12)
-                .fontColor('#9A651D')
-                .width('100%')
-                .padding({ left: 12, right: 12, top: 10, bottom: 10 })
-                .borderRadius(14)
-                .backgroundColor(ControlCenterTheme.warningSoft)
-                .margin({ top: 10 })
-            }
-            ForEach(this.sdata.slice(0, 50), (item: SensorDataItem) => {
-              Row() {
-                Column() {
-                  Text(this.lb(item.data_type)).fontSize(14).fontWeight(FontWeight.Bold).fontColor(TEXT_PRIMARY)
-                  Text(this.dn(item.device_id)).fontSize(ControlCenterTheme.assistSize).fontColor(TEXT_SECONDARY).margin({ top: 4 })
-                }
-                .layoutWeight(1)
-                .alignItems(HorizontalAlign.Start)
-
-                Column() {
-                  Text(item.value.toFixed(1) + this.un(item.data_type)).fontSize(20).fontWeight(FontWeight.Bold).fontColor(PRIMARY)
-                  Text(this.tm(item.timestamp)).fontSize(ControlCenterTheme.assistSize).fontColor(TEXT_SECONDARY).margin({ top: 4 })
-                }
-                .alignItems(HorizontalAlign.End)
-              }
-              .width('100%')
-              .padding({ left: 16, right: 16, top: 14, bottom: 14 })
-              .borderRadius(18)
-              .backgroundColor(CARD_BG)
-              .margin({ top: 10 })
-            }, (item: SensorDataItem) => item.id.toString())
-          }
+          this.filterChip('全部传感器', 0, () => { this.curId = 0; this.refresh() })
+          ForEach(this.sensors, (device: Device) => {
+            this.filterChip(device.name, device.id, () => { this.curId = device.id; this.refresh() })
+          }, (device: Device) => device.id.toString())
         }
       }
+      .scrollable(ScrollDirection.Horizontal)
+      .scrollBar(BarState.Off)
       .width('100%')
-      .margin({ top: 16 })
+
+      Row() {
+        this.rangeChip('24小时', 24, () => { this.historyHours = 24; this.refresh() })
+        this.rangeChip('7天', 168, () => { this.historyHours = 168; this.refresh() })
+      }
+      .width('100%')
+      .margin({ top: 12 })
+
+      if (this.sdata.length === 0) {
+        this.buildEmptyState('暂无历史记录', '历史传感器记录会显示在这里')
+      } else {
+        Column() {
+          Text(this.historySummary())
+            .fontSize(12)
+            .fontColor(TEXT_SECONDARY)
+            .width('100%')
+            .margin({ top: 14, bottom: 2 })
+          if (this.historyInsight()) {
+            Text(this.historyInsight())
+              .fontSize(12)
+              .fontColor('#9A651D')
+              .width('100%')
+              .padding({ left: 12, right: 12, top: 10, bottom: 10 })
+              .borderRadius(14)
+              .backgroundColor(ControlCenterTheme.warningSoft)
+              .margin({ top: 10 })
+          }
+          ForEach(this.sdata.slice(0, 50), (item: SensorDataItem) => {
+            Row() {
+              Column() {
+                Text(this.lb(item.data_type)).fontSize(14).fontWeight(FontWeight.Bold).fontColor(TEXT_PRIMARY)
+                Text(this.dn(item.device_id)).fontSize(ControlCenterTheme.assistSize).fontColor(TEXT_SECONDARY).margin({ top: 4 })
+              }
+              .layoutWeight(1)
+              .alignItems(HorizontalAlign.Start)
+
+              Column() {
+                Text(item.value.toFixed(1) + this.un(item.data_type)).fontSize(20).fontWeight(FontWeight.Bold).fontColor(PRIMARY)
+                Text(this.tm(item.timestamp)).fontSize(ControlCenterTheme.assistSize).fontColor(TEXT_SECONDARY).margin({ top: 4 })
+              }
+              .alignItems(HorizontalAlign.End)
+            }
+            .width('100%')
+            .padding({ left: 16, right: 16, top: 14, bottom: 14 })
+            .borderRadius(18)
+            .backgroundColor(CARD_BG)
+            .margin({ top: 10 })
+          }, (item: SensorDataItem) => item.id.toString())
+        }
+      }
     }
+    .width('100%')
+    .margin({ top: 16 })
   }
 
   @Builder buildLogsPanel() {
-    if (this.logsLoading) {
-      this.buildSectionLoading('正在刷新日志...')
-    } else if (this.logs.length === 0) {
+    if (this.logs.length === 0) {
       this.buildEmptyState('暂无操作日志', '设备与自动化日志会显示在这里')
     } else {
       Column() {
@@ -571,19 +577,6 @@ struct DataMonitorPage {
     Column() {
       Text(title).fontSize(15).fontWeight(FontWeight.Bold).fontColor(TEXT_PRIMARY)
       Text(subtitle).fontSize(12).fontColor(TEXT_SECONDARY).margin({ top: 6 })
-    }
-    .width('100%')
-    .padding({ top: 28, bottom: 28 })
-    .borderRadius(22)
-    .backgroundColor(CARD_BG)
-    .alignItems(HorizontalAlign.Center)
-    .margin({ top: 16 })
-  }
-
-  @Builder buildSectionLoading(label: string) {
-    Column() {
-      LoadingProgress().width(30).height(30).color(PRIMARY)
-      Text(label).fontSize(13).fontColor(TEXT_SECONDARY).margin({ top: 12 })
     }
     .width('100%')
     .padding({ top: 28, bottom: 28 })
