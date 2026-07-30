@@ -34,7 +34,7 @@ struct DataMonitorPage {
   @State tab: number = 0
   @State curId: number = 0
   @State historyHours: number = 24
-  @State loading: boolean = false
+  @State loading: boolean = true
   @State historyLoading: boolean = false
   @State logsLoading: boolean = false
   @State errorMessage: string = ''
@@ -370,8 +370,8 @@ struct DataMonitorPage {
   @Builder buildTabs() {
     Row() {
       this.tabChip('实时数据', 0, () => { this.tab = 0 })
-      this.tabChip('历史记录', 1, () => { this.tab = 1; this.refresh() })
-      this.tabChip('运行日志', 2, () => { this.tab = 2; this.refresh() })
+      this.tabChip('历史记录', 1, () => { this.tab = 1 })
+      this.tabChip('运行日志', 2, () => { this.tab = 2 })
     }
     .width('100%')
     .padding(4)
@@ -391,9 +391,8 @@ struct DataMonitorPage {
       .padding({ top: 13, bottom: 13 })
       .borderRadius(ControlCenterTheme.radiusPill)
       .backgroundColor(this.tab === tabIndex ? CARD_BG : '#00000000')
-      .border({ width: this.tab === tabIndex ? 1 : 0, color: this.tab === tabIndex ? ControlCenterTheme.border : '#00000000' })
+      .border({ width: 1, color: this.tab === tabIndex ? ControlCenterTheme.border : '#00000000' })
       .shadow(this.tab === tabIndex ? { radius: 6, color: ControlCenterTheme.shadowSoft, offsetY: 2 } : { radius: 0, color: '#00000000', offsetY: 0 })
-      .animation({ duration: 180, curve: Curve.EaseOut })
       .onClick(action)
   }
 
@@ -552,7 +551,6 @@ struct DataMonitorPage {
       .borderRadius(14)
       .backgroundColor(this.curId === deviceId ? PRIMARY : CARD_BG)
       .margin({ right: 8 })
-      .animation({ duration: 180, curve: Curve.EaseOut })
       .onClick(action)
   }
 
@@ -566,7 +564,6 @@ struct DataMonitorPage {
       .borderRadius(14)
       .backgroundColor(this.historyHours === hours ? PRIMARY : ControlCenterTheme.surfaceMuted)
       .margin({ right: 8 })
-      .animation({ duration: 180, curve: Curve.EaseOut })
       .onClick(action)
   }
 

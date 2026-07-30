@@ -24,7 +24,7 @@ function localizeMessage(message: string, fallback: string): string {
 @Component
 struct ProfilePage {
   @State user: UserInfo = new UserInfo()
-  @State loading: boolean = false
+  @State loading: boolean = true
   @State showPwd: boolean = false
   @State old: string = ''
   @State np: string = ''
@@ -385,7 +385,7 @@ struct ProfilePage {
       Text('正在加载个人信息...').fontSize(13).fontColor(TEXT_SECONDARY).margin({ top: 14 })
     }
     .width('100%')
-    .height('100%')
+    .layoutWeight(1)
     .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Center)
   }

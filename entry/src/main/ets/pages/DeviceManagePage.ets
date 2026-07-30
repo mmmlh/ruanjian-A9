@@ -256,7 +256,6 @@ struct DeviceManagePage {
             .borderRadius(ControlCenterTheme.radiusChip)
             .backgroundColor(this.bindRoomId === room.id ? ControlCenterTheme.accent : ControlCenterTheme.surfaceMuted)
             .margin({ right: 8 })
-            .animation({ duration: 180, curve: Curve.EaseOut })
           .onClick(() => { this.bindRoomId = room.id })
         }, (room: Room) => room.id.toString())
       }
@@ -377,9 +376,8 @@ struct DeviceManagePage {
       .padding({ top: 13, bottom: 13 })
       .borderRadius(ControlCenterTheme.radiusPill)
       .backgroundColor(this.viewMode === mode ? ControlCenterTheme.surface : '#00000000')
-      .border({ width: this.viewMode === mode ? 1 : 0, color: this.viewMode === mode ? ControlCenterTheme.border : '#00000000' })
+      .border({ width: 1, color: this.viewMode === mode ? ControlCenterTheme.border : '#00000000' })
       .shadow(this.viewMode === mode ? { radius: 6, color: ControlCenterTheme.shadowSoft, offsetY: 2 } : { radius: 0, color: '#00000000', offsetY: 0 })
-      .animation({ duration: 180, curve: Curve.EaseOut })
       .onClick(action)
   }
 

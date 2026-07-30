@@ -243,7 +243,7 @@ struct DashboardPage {
   @State temp: string = '--'
   @State hum: string = '--'
   @State exe: number = -1
-  @State loading: boolean = false
+  @State loading: boolean = true
   @State errorMessage: string = ''
   @State successMessage: string = ''
   @State onlineCount: number = 0
@@ -621,7 +621,7 @@ struct DashboardPage {
         .margin({ top: 14 })
     }
     .width('100%')
-    .height('100%')
+    .layoutWeight(1)
     .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Center)
   }
@@ -1061,9 +1061,8 @@ struct DashboardPage {
       .height(ControlCenterTheme.tapTarget)
       .borderRadius(ControlCenterTheme.radiusChip)
       .backgroundColor(this.cur === roomId ? ControlCenterTheme.accent : ControlCenterTheme.surface)
-      .border({ width: this.cur === roomId ? 0 : 1, color: ControlCenterTheme.border })
+      .border({ width: 1, color: this.cur === roomId ? ControlCenterTheme.accent : ControlCenterTheme.border })
       .margin({ right: 8 })
-      .animation({ duration: 180, curve: Curve.EaseOut })
       .onClick(action)
   }
 

@@ -636,9 +636,8 @@ struct DeviceRemotePage {
               .height(ControlCenterTheme.tapTarget)
               .borderRadius(ControlCenterTheme.radiusChip)
               .backgroundColor(this.ix === i ? ControlCenterTheme.accent : ControlCenterTheme.surface)
-              .border({ width: this.ix === i ? 0 : 1, color: ControlCenterTheme.border })
+              .border({ width: 1, color: this.ix === i ? ControlCenterTheme.accent : ControlCenterTheme.border })
               .margin({ right: 8 })
-              .animation({ duration: 180, curve: Curve.EaseOut })
               .onClick(() => this.sl(i))
           }, (device: Device) => device.id.toString())
         }

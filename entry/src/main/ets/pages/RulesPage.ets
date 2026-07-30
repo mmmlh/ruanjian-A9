@@ -507,9 +507,9 @@ struct RulesPage {
       }
       .width('100%')
       Row() {
-        MetricChip({ label: '已启用', value: this.enabledCount().toString(), tone: 'success' }).layoutWeight(1)
+        this.ruleMetricPill(0)
         Blank().width(10)
-        MetricChip({ label: '全部规则', value: this.rules.length.toString(), tone: 'accent' }).layoutWeight(1)
+        this.ruleMetricPill(1)
       }
       .width('100%')
       .margin({ top: 14 })
@@ -520,6 +520,32 @@ struct RulesPage {
     .backgroundColor(ControlCenterTheme.surface)
     .border({ width: 1, color: ControlCenterTheme.border })
     .shadow({ radius: 10, color: ControlCenterTheme.shadowSoft, offsetY: 4 })
+  }
+
+  @Builder ruleMetricPill(metric: number) {
+    Row() {
+      Column()
+        .width(8)
+        .height(8)
+        .borderRadius(4)
+        .backgroundColor(metric === 0 ? ControlCenterTheme.accent : ControlCenterTheme.textTertiary)
+      Text(metric === 0 ? '已启用' : '全部规则')
+        .fontSize(13)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(metric === 0 ? '#197D66' : ControlCenterTheme.textSecondary)
+        .margin({ left: 8 })
+      Blank()
+      Text(metric === 0 ? this.enabledCount().toString() : this.rules.length.toString())
+        .fontSize(18)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(metric === 0 ? ControlCenterTheme.accent : ControlCenterTheme.textPrimary)
+    }
+    .layoutWeight(1)
+    .height(52)
+    .padding({ left: 14, right: 14 })
+    .borderRadius(ControlCenterTheme.radiusInner)
+    .backgroundColor(metric === 0 ? ControlCenterTheme.accentSoft : ControlCenterTheme.surfaceMuted)
+    .border({ width: 1, color: metric === 0 ? '#CDEEDB' : ControlCenterTheme.border })
   }
 
   @Builder buildRuleTabs() {
@@ -545,9 +571,8 @@ struct RulesPage {
       .padding({ top: 13, bottom: 13 })
       .borderRadius(ControlCenterTheme.radiusPill)
       .backgroundColor(this.ruleTab === tabIndex ? ControlCenterTheme.surface : '#00000000')
-      .border({ width: this.ruleTab === tabIndex ? 1 : 0, color: this.ruleTab === tabIndex ? ControlCenterTheme.border : '#00000000' })
+      .border({ width: 1, color: this.ruleTab === tabIndex ? ControlCenterTheme.border : '#00000000' })
       .shadow(this.ruleTab === tabIndex ? { radius: 6, color: ControlCenterTheme.shadowSoft, offsetY: 2 } : { radius: 0, color: '#00000000', offsetY: 0 })
-      .animation({ duration: 180, curve: Curve.EaseOut })
       .onClick(action)
   }
 
@@ -782,7 +807,6 @@ struct RulesPage {
       .borderRadius(ControlCenterTheme.radiusChip)
       .backgroundColor(this.isChoiceSelected(group, value) ? ControlCenterTheme.accent : ControlCenterTheme.surfaceTint)
       .margin({ right: 8, bottom: 8 })
-      .animation({ duration: 180, curve: Curve.EaseOut })
       .onClick(action)
   }
 
