@@ -32,6 +32,84 @@ def braced_section(text: str, marker: str) -> str:
 def test_compact_semantic_theme_and_shared_components_exist():
     theme = (COMMON / "ControlCenterTheme.ets").read_text(encoding="utf-8")
     kit = (COMMON / "ControlCenterKit.ets").read_text(encoding="utf-8")
+
+    bottom_nav = braced_section(kit, "export struct AppBottomNav")
+    nav_item = braced_section(bottom_nav, "private item")
+    assert "Button() {" in nav_item
+    assert "height(ControlCenterTheme.tapTarget)" in nav_item
+    assert ".accessibilityText(this.active === key ? label + '，当前页面' : label)" in nav_item
+    assert (
+        ".fontColor(this.active === key ? ControlCenterTheme.textPrimary : "
+        "ControlCenterTheme.textSecondary)" in nav_item
+    )
+
+    top_bar = braced_section(kit, "export struct AppTopBar")
+    assert "@Prop actionType: string = 'refresh'" in top_bar
+    back_action = braced_section(top_bar, "if (this.showBack)")
+    assert "Button() {" in back_action
+    assert ".accessibilityText('返回')" in back_action
+    assert ".onClick(() => this.getUIContext().getRouter().back())" in back_action
+    top_bar_action = braced_section(top_bar, "if (this.actionLabel)")
+    assert "Button() {" in top_bar_action
+    assert "if (this.actionType === 'add')" in top_bar_action
+    assert "this.actionLabel ===" not in top_bar_action
+    icon_mapping = re.search(
+        r"if \(this\.actionType === 'add'\) \{(?P<add>.*?)\} else \{(?P<refresh>.*?)\}",
+        top_bar_action,
+        re.DOTALL,
+    )
+    assert icon_mapping is not None
+    assert "$r('app.media.action_add')" in icon_mapping.group("add")
+    assert "$r('app.media.action_refresh')" not in icon_mapping.group("add")
+    assert "$r('app.media.action_refresh')" in icon_mapping.group("refresh")
+    assert "$r('app.media.action_add')" not in icon_mapping.group("refresh")
+    assert ".fontColor(ControlCenterTheme.textPrimary)" in top_bar_action
+    assert ".accessibilityText(this.actionLabel)" in top_bar_action
+    assert ".onClick(() => this.onAction())" in top_bar_action
+
+    assert "export struct PrimaryButton" in kit
+    assert "export struct SecondaryButton" in kit
+    primary_button = braced_section(kit, "export struct PrimaryButton")
+    secondary_button = braced_section(kit, "export struct SecondaryButton")
+    assert "height(ControlCenterTheme.tapTarget)" in primary_button
+    assert ".fontSize(14)" in primary_button
+    assert ".fontWeight(FontWeight.Bold)" in primary_button
+    assert "height(ControlCenterTheme.tapTarget)" in secondary_button
+
+    empty_state = braced_section(kit, "export struct EmptyState")
+    assert "@Prop actionLabel: string = ''" in empty_state
+    assert "@Prop actionEnabled: boolean = true" in empty_state
+    assert "@Prop onAction: () => void = () => {}" in empty_state
+    empty_action = braced_section(empty_state, "if (this.actionLabel)")
+    assert "Button(this.actionLabel)" in empty_action
+    assert ".height(ControlCenterTheme.tapTarget)" in empty_action
+    assert ".enabled(this.actionEnabled)" in empty_action
+    assert ".onClick(() => this.onAction())" in empty_action
+
+    confirm_panel = braced_section(kit, "export struct ConfirmPanel")
+    confirm_detail = braced_section(confirm_panel, "if (this.detail)")
+    assert ".fontColor(ControlCenterTheme.textPrimary)" in confirm_detail
+
+    section_title = braced_section(kit, "export struct SectionTitle")
+    trailing = braced_section(section_title, "if (this.trailing)")
+    assert ".fontColor(ControlCenterTheme.textPrimary)" in trailing
+
+    status_banner = braced_section(kit, "export struct StatusBanner")
+    tone_label = braced_section(status_banner, "private toneLabel")
+    for label in ["成功", "警告", "错误", "提示"]:
+        assert f"return '{label}'" in tone_label
+    assert status_banner.index("Text(this.toneLabel())") < status_banner.index("Text(this.message)")
+    assert status_banner.count(".fontColor(ControlCenterTheme.textPrimary)") >= 3
+    assert ".opacity(0.72)" not in status_banner
+
+    metric_chip = braced_section(kit, "export struct MetricChip")
+    label_color = braced_section(metric_chip, "private labelColor")
+    assert (
+        "return this.inverse ? ControlCenterTheme.textOnDarkMuted : "
+        "ControlCenterTheme.textPrimary" in label_color
+    )
+
+    assert ".fontSize(11)" not in kit
     assert "static readonly pageBg: string = '#F4F6F5'" in theme
     assert "static readonly accent: string = '#14875B'" in theme
     assert "static readonly radiusCard: number = 8" in theme
