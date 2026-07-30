@@ -48,38 +48,47 @@ def test_core_pages_use_shared_theme_or_kit_instead_of_only_local_color_constant
 def test_interior_pages_share_the_mijia_style_green_theme():
     theme_source = THEME_FILE.read_text(encoding="utf-8")
 
-    assert "static readonly pageBg: string = '#F6F7F6'" in theme_source
-    assert "static readonly accent: string = '#07C160'" in theme_source
-    assert "static readonly accentSoft: string = '#E8F8EE'" in theme_source
+    assert "static readonly pageBg: string = '#F4F6F5'" in theme_source
+    assert "static readonly accent: string = '#14875B'" in theme_source
+    assert "static readonly accentSoft: string = '#E4F3EC'" in theme_source
 
     for name, path in INTERIOR_PAGES.items():
         source = path.read_text(encoding="utf-8")
         assert "ControlCenterTheme" in source, f"{name} should use the shared interior visual theme"
 
 
-def test_primary_mijia_flows_use_the_design_draft_hierarchy():
+def test_dashboard_uses_the_compact_shared_hierarchy():
     dashboard_source = INTERIOR_PAGES["DashboardPage"].read_text(encoding="utf-8")
-    device_source = INTERIOR_PAGES["DeviceRemotePage"].read_text(encoding="utf-8")
-    rules_source = INTERIOR_PAGES["RulesPage"].read_text(encoding="utf-8")
 
-    assert "this.buildHomeHeader()" in dashboard_source
-    assert "Text('我的家')" in dashboard_source
-    assert "Text('一切正常')" in dashboard_source
+    assert (
+        "AppTopBar({ title: '我的家', subtitle: this.syncStatusLabel(), "
+        "actionLabel: '刷新', onAction: () => this.rf() })" in dashboard_source
+    )
     assert "this.buildSceneQuickCard(" in dashboard_source
-    assert "this.bottomTab('首页', '⌂', true" in dashboard_source
-    assert "this.buildControlHero()" in device_source
-    assert "Text('常用操作')" in device_source
-    assert "this.buildRuleTabs()" in rules_source
-    assert "Text('推荐场景')" in rules_source
+    for legacy_name in [
+        "buildHomeHeader", "buildHeroCard", "heroIconButton", "buildHeroPortal",
+        "buildOverviewSection", "buildSceneStrip", "buildMijiaBottomNav",
+        "buildBottomNav", "bottomTab",
+    ]:
+        assert legacy_name not in dashboard_source
 
 
-def test_device_management_actions_use_the_approved_monochrome_buttons_only():
+def test_device_management_uses_semantic_shared_controls():
     source = INTERIOR_PAGES["DeviceManagePage"].read_text(encoding="utf-8")
 
-    assert "const DEVICE_ACTION_PRIMARY: string = '#111111'" in source
-    assert "const DEVICE_ACTION_SECONDARY_BG: string = '#EEEEEE'" in source
-    assert "fontColor(DEVICE_ACTION_SECONDARY_FG)" in source
-    assert "backgroundColor(DEVICE_ACTION_PRIMARY).fontColor('#FFFFFF')" in source
+    for component in ["AppTopBar", "AppBottomNav", "StatusBanner", "EmptyState", "ConfirmPanel"]:
+        assert component in source
+    assert "AppTopBar({ title: '设备'" in source
+    assert "actionLabel: '添加设备'" in source
+    assert "actionType: 'add'" in source
+    assert "Button('编辑')" in source
+    assert "Button(this.deletingId === device.id ? '删除中...' : '删除')" in source
+    assert "ControlCenterTheme.tapTarget" in source
+    assert "ControlCenterTheme.controlHeight" in source
+    assert "ControlCenterTheme.overlay" in source
+    assert "DEVICE_ACTION_PRIMARY" not in source
+    assert "DEVICE_ACTION_SECONDARY_BG" not in source
+    assert "DEVICE_ACTION_SECONDARY_FG" not in source
 
 
 def test_device_management_hides_mqtt_topics_and_uses_accessible_bind_target():

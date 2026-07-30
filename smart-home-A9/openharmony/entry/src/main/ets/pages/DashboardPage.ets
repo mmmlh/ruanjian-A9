@@ -1,8 +1,7 @@
 import { getDashboardSummary, executeScene } from '../common/ApiClient'
 import { connectWS, disconnectWS } from '../common/MqttClient'
 import { ControlCenterTheme } from '../common/ControlCenterTheme'
-import { AppBottomNav, SectionTitle, StatusBanner, MetricChip } from '../common/ControlCenterKit'
-import { SmartHomeLogoSmall } from '../common/SmartHomeLogo'
+import { AppTopBar, AppBottomNav, SectionTitle, StatusBanner } from '../common/ControlCenterKit'
 import { UiText } from '../common/UiText'
 import { Room, Device, Scene, LogItem, parseDeviceStatus } from '../model/DeviceModel'
 
@@ -20,15 +19,15 @@ function localizeMessage(message: string, fallback: string): string {
 class DashboardHelper {
   static icon(type: string): string {
     switch (type) {
-      case 'light': return '\uD83D\uDCA1'
-      case 'ac': return '\u2744\uFE0F'
-      case 'door_lock': return '\uD83D\uDD12'
-      case 'temperature_sensor': return '\uD83C\uDF21\uFE0F'
-      case 'humidity_sensor': return '\uD83D\uDCA7'
-      case 'pir_sensor': return '\uD83D\uDC63'
-      case 'curtain': return '\uD83E\uDE9B'
-      case 'humidifier': return '\uD83D\uDCA8'
-      default: return '\uD83D\uDD0C'
+      case 'light': return '灯'
+      case 'ac': return '空'
+      case 'door_lock': return '锁'
+      case 'temperature_sensor': return '温'
+      case 'humidity_sensor': return '湿'
+      case 'pir_sensor': return '人'
+      case 'curtain': return '帘'
+      case 'humidifier': return '雾'
+      default: return '设'
     }
   }
 
@@ -223,12 +222,12 @@ class DashboardHelper {
 }
 
 let SCENE_ICONS: Record<string, string> = {
-  'Home Mode': '\uD83C\uDFE0',
-  'Away Mode': '\uD83D\uDEAA',
-  'Sleep Mode': '\uD83C\uDF19',
-  '回家模式': '\uD83C\uDFE0',
-  '离家模式': '\uD83D\uDEAA',
-  '睡眠模式': '\uD83C\uDF19'
+  'Home Mode': '家',
+  'Away Mode': '离',
+  'Sleep Mode': '眠',
+  '回家模式': '家',
+  '离家模式': '离',
+  '睡眠模式': '眠'
 }
 
 @Entry
@@ -264,6 +263,9 @@ struct DashboardPage {
   }
 
   async ld(): Promise<void> {
+    if (this.loading) {
+      return
+    }
     this.loading = true
     this.errorMessage = ''
     try {
@@ -340,6 +342,9 @@ struct DashboardPage {
   }
 
   async ds(sceneId: number): Promise<void> {
+    if (this.exe >= 0) {
+      return
+    }
     this.exe = sceneId
     this.errorMessage = ''
     this.successMessage = ''
@@ -354,7 +359,38 @@ struct DashboardPage {
     }
   }
 
+  parseSceneActions(scene: Scene): Array<Record<string, Object>> {
+    let actions: Array<Record<string, Object>> = []
+    if (!scene.actions_json) {
+      return actions
+    }
+
+    try {
+      let parsed = JSON.parse(scene.actions_json) as Object
+      if (Array.isArray(parsed)) {
+        let parsedActions = parsed as Array<Record<string, Object>>
+        for (let index = 0; index < parsedActions.length; index++) {
+          actions.push(parsedActions[index])
+        }
+      } else if (parsed !== null && typeof parsed === 'object') {
+        actions.push(parsed as Record<string, Object>)
+      }
+    } catch (err) {
+    }
+    return actions
+  }
+
   isSafetySensitiveScene(scene: Scene): boolean {
+    let actions = this.parseSceneActions(scene)
+    for (let index = 0; index < actions.length; index++) {
+      let deviceType = DashboardHelper.stringifyValue(actions[index]['device_type']).toLowerCase()
+      let action = DashboardHelper.stringifyValue(actions[index]['action']).toLowerCase()
+      let sensitiveDevice = deviceType === 'door_lock' || deviceType === 'security' || deviceType === 'alarm'
+      let sensitiveAction = action === 'lock' || action === 'unlock' || action === 'arm' || action === 'disarm'
+      if (sensitiveDevice || sensitiveAction) {
+        return true
+      }
+    }
     let name = DashboardHelper.sceneName(scene.name)
     return name.indexOf('离家') >= 0 || name.indexOf('安防') >= 0 || name.indexOf('门锁') >= 0 || name.indexOf('锁门') >= 0
   }
@@ -369,6 +405,9 @@ struct DashboardPage {
   }
 
   requestScene(sceneId: number): void {
+    if (this.exe >= 0) {
+      return
+    }
     let scene = this.sceneById(sceneId)
     if (scene !== null && this.isSafetySensitiveScene(scene)) {
       this.pendingSceneId = sceneId
@@ -378,6 +417,9 @@ struct DashboardPage {
   }
 
   confirmScene(): void {
+    if (this.exe >= 0) {
+      return
+    }
     let sceneId = this.pendingSceneId
     this.pendingSceneId = -1
     if (sceneId > 0) {
@@ -423,12 +465,28 @@ struct DashboardPage {
         continue
       }
       let mergedStatus = this.mergeRealtimeStatus(device.status_json, mergedPayload)
-      device.status_json = JSON.stringify(mergedStatus)
-      device.status_summary = ''
-      device.online = true
+      let replacement = new Device()
+      replacement.id = device.id
+      replacement.room_id = device.room_id
+      replacement.type = device.type
+      replacement.name = device.name
+      replacement.brand = device.brand
+      replacement.mqtt_topic = device.mqtt_topic
+      replacement.status_json = device.status_json
+      replacement.room_name = device.room_name
+      replacement.updated_at = device.updated_at
+      replacement.last_seen_at = device.last_seen_at
+      replacement.status_summary = device.status_summary
+      replacement.online = device.online
+      replacement.status_json = JSON.stringify(mergedStatus)
       let now = new Date().toISOString()
-      device.updated_at = now
-      device.last_seen_at = now
+      replacement.updated_at = now
+      replacement.last_seen_at = now
+      replacement.status_summary = ''
+      replacement.online = true
+      let updatedDevices: Device[] = this.devices.slice()
+      updatedDevices[i] = replacement
+      this.devices = updatedDevices
       this.syncClimate()
       this.recountOnline()
       return
@@ -510,7 +568,7 @@ struct DashboardPage {
 
   dotColor(device: Device): string {
     if (!device.online) {
-      return '#D7DEE6'
+      return ControlCenterTheme.borderStrong
     }
     let status = parseDeviceStatus(device.status_json)
     if (device.type === 'light' || device.type === 'ac' || device.type === 'humidifier') {
@@ -520,7 +578,7 @@ struct DashboardPage {
       return status.locked ? ControlCenterTheme.success : ControlCenterTheme.warning
     }
     if (device.type === 'pir_sensor') {
-      return status.presence ? ControlCenterTheme.warning : '#D7DEE6'
+      return status.presence ? ControlCenterTheme.warning : ControlCenterTheme.borderStrong
     }
     return ControlCenterTheme.accent
   }
@@ -530,7 +588,7 @@ struct DashboardPage {
     if (icon !== undefined && icon !== null) {
       return icon
     }
-    return '\u2728'
+    return '景'
   }
 
   shortTime(value: string): string {
@@ -557,15 +615,6 @@ struct DashboardPage {
     return this.flt(this.cur)
   }
 
-  firstDeviceIdByType(deviceType: string): number {
-    for (let i = 0; i < this.devices.length; i++) {
-      if (this.devices[i].type === deviceType) {
-        return this.devices[i].id
-      }
-    }
-    return 0
-  }
-
   quickAction(route: string): void {
     try {
       this.getUIContext().getRouter().pushUrl({ url: route })
@@ -581,12 +630,14 @@ struct DashboardPage {
 
   build() {
     Column() {
+      AppTopBar({ title: '我的家', subtitle: this.syncStatusLabel(), actionLabel: '刷新', onAction: () => this.rf() })
+        .padding({ left: ControlCenterTheme.gutter, right: ControlCenterTheme.gutter,
+          top: ControlCenterTheme.spaceMd, bottom: ControlCenterTheme.spaceSm })
       if (this.loading) {
         this.buildLoading()
       } else {
         Scroll() {
           Column() {
-            this.buildHomeHeader()
             this.buildMijiaHomeHero()
             this.buildFeedback()
             if (this.pendingSceneId > 0) {
@@ -597,7 +648,8 @@ struct DashboardPage {
             this.buildDeviceGrid()
             this.buildActivityPanel()
           }
-          .padding({ left: 16, right: 16, top: 16, bottom: 24 })
+          .padding({ left: ControlCenterTheme.gutter, right: ControlCenterTheme.gutter,
+            top: ControlCenterTheme.spaceSm, bottom: ControlCenterTheme.spaceXl })
         }
         .layoutWeight(1)
         .scrollBar(BarState.Off)
@@ -621,7 +673,7 @@ struct DashboardPage {
         .margin({ top: 14 })
     }
     .width('100%')
-    .height('100%')
+    .layoutWeight(1)
     .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Center)
   }
@@ -662,8 +714,9 @@ struct DashboardPage {
           .layoutWeight(1)
           .height(ControlCenterTheme.controlHeight)
           .backgroundColor(ControlCenterTheme.accent)
-          .fontColor('#FFFFFF')
+          .fontColor(ControlCenterTheme.surface)
           .borderRadius(ControlCenterTheme.radiusInner)
+          .enabled(this.exe < 0)
           .onClick(() => this.confirmScene())
       }
       .width('100%')
@@ -676,215 +729,57 @@ struct DashboardPage {
     .margin({ top: 14 })
   }
 
-  @Builder buildHomeHeader() {
-    Row() {
-      Column() {
-        Text('我的家')
-          .fontSize(28)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(ControlCenterTheme.textPrimary)
-        Text(this.syncStatusLabel())
-          .fontSize(12)
-          .fontColor(ControlCenterTheme.textSecondary)
-          .margin({ top: 6 })
-      }
-      .alignItems(HorizontalAlign.Start)
-      .layoutWeight(1)
-      Text('⌕')
-        .fontSize(22)
-        .fontColor(ControlCenterTheme.accent)
-        .width(42)
-        .height(42)
-        .textAlign(TextAlign.Center)
-        .padding({ top: 7 })
-        .borderRadius(21)
-        .backgroundColor(ControlCenterTheme.accentSoft)
-        .onClick(() => this.quickAction('pages/DeviceManagePage'))
-    }
-    .width('100%')
-    .alignItems(VerticalAlign.Center)
-    .margin({ bottom: 16 })
-  }
-
   @Builder buildMijiaHomeHero() {
-    Row() {
-      Column() {
-        Text('全屋状态')
-          .fontSize(14)
-          .fontColor(ControlCenterTheme.textSecondary)
-        if (this.offlineCount() > 0) {
-          Text('需要关注')
-            .fontSize(26)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(ControlCenterTheme.textPrimary)
-            .margin({ top: 8 })
-        } else {
-          Text('一切正常')
-            .fontSize(26)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(ControlCenterTheme.textPrimary)
-            .margin({ top: 8 })
-        }
-        Text(this.onlineCount.toString() + ' 个设备在线 · ' + this.scenes.length.toString() + ' 条场景可用')
-          .fontSize(12)
-          .fontColor(ControlCenterTheme.textSecondary)
-          .margin({ top: 8 })
-      }
-      .alignItems(HorizontalAlign.Start)
-      .layoutWeight(1)
-      Text('⌂')
-        .fontSize(34)
-        .fontColor('#FFFFFF')
-        .width(68)
-        .height(68)
-        .textAlign(TextAlign.Center)
-        .padding({ top: 13 })
-        .borderRadius(34)
-        .backgroundColor(ControlCenterTheme.accent)
-        .onClick(() => this.rf())
-    }
-    .width('100%')
-    .padding(22)
-    .borderRadius(ControlCenterTheme.radiusHero)
-    .backgroundColor(ControlCenterTheme.accentSoft)
-  }
-
-  @Builder buildHeroCard() {
     Column() {
-      Row() {
-        Row() {
-          SmartHomeLogoSmall()
-          Column() {
-            Text('全屋控制终端')
-              .fontSize(20)
-              .fontWeight(FontWeight.Bold)
-              .fontColor(ControlCenterTheme.textPrimary)
-            Text('状态、场景、设备控制集中可见')
-              .fontSize(12)
-              .fontColor(ControlCenterTheme.textSecondary)
-              .margin({ top: 4 })
-          }
-          .margin({ left: 10 })
-          .alignItems(HorizontalAlign.Start)
-          .layoutWeight(1)
-        }
-        .layoutWeight(1)
-
-        Row() {
-          this.heroIconButton('\uD83D\uDCCA', () => this.quickAction('pages/DataMonitorPage'))
-          this.heroIconButton('\uD83D\uDC64', () => this.quickAction('pages/ProfilePage'))
-          this.heroIconButton('\u21BB', () => this.rf())
-        }
-      }
-      .width('100%')
-
-      StatusBanner({
-        message: this.ok ? '实时连接正常' : '实时连接中断',
-        detail: this.ok ? 'MQTT / WebSocket 在线' : '等待自动重连',
-        tone: this.ok ? 'success' : 'warning'
-      })
-        .margin({ top: 18 })
-
-      Row() {
-        MetricChip({ label: '在线设备', value: this.onlineCount.toString() + '/' + this.totalCount.toString(), tone: 'success' })
-          .layoutWeight(1)
-        Blank().width(10)
-        MetricChip({ label: '室内温度', value: this.temp + '°C', tone: 'accent' })
-          .layoutWeight(1)
-        Blank().width(10)
-        MetricChip({ label: '空气湿度', value: this.hum + '%', tone: 'warning' })
-          .layoutWeight(1)
-      }
-      .width('100%')
-      .margin({ top: 18 })
-
-      Row() {
-        this.buildHeroPortal('场景联动', '快速进入自动化与常用场景', '\u2728', () => this.quickAction('pages/RulesPage'))
-        Blank().width(10)
-        this.buildHeroPortal('数据监测', '查看传感器和最近事件', '\uD83D\uDCCA', () => this.quickAction('pages/DataMonitorPage'))
-      }
-      .width('100%')
-      .margin({ top: 18 })
-    }
-    .padding(20)
-    .borderRadius(ControlCenterTheme.radiusHero)
-    .backgroundColor(ControlCenterTheme.surface)
-    .border({ width: 1, color: ControlCenterTheme.border })
-    .shadow({ radius: 18, color: ControlCenterTheme.shadowSoft, offsetY: 8 })
-  }
-
-  @Builder heroIconButton(icon: string, action: () => void) {
-    Column() {
-      Text(icon)
-        .fontSize(15)
-        .fontColor(ControlCenterTheme.accent)
-    }
-    .width(38)
-    .height(38)
-    .borderRadius(14)
-    .backgroundColor(ControlCenterTheme.accentSoft)
-    .justifyContent(FlexAlign.Center)
-    .alignItems(HorizontalAlign.Center)
-    .margin({ left: 8 })
-    .onClick(action)
-  }
-
-  @Builder buildHeroPortal(title: string, subtitle: string, icon: string, action: () => void) {
-    Row() {
-      Column() {
-        Text(icon).fontSize(20)
-      }
-      .width(42)
-      .height(42)
-      .borderRadius(16)
-      .backgroundColor(ControlCenterTheme.accentSoft)
-      .justifyContent(FlexAlign.Center)
-      .alignItems(HorizontalAlign.Center)
-
-      Column() {
-        Text(title)
-          .fontSize(14)
+      Text('全屋状态')
+        .fontSize(12)
+        .fontColor(ControlCenterTheme.textSecondary)
+      if (this.offlineCount() > 0) {
+        Text('需要关注')
+          .fontSize(22)
           .fontWeight(FontWeight.Bold)
           .fontColor(ControlCenterTheme.textPrimary)
-        Text(subtitle)
-          .fontSize(11)
-          .fontColor(ControlCenterTheme.textSecondary)
-          .margin({ top: 4 })
-          .maxLines(2)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .margin({ top: ControlCenterTheme.spaceSm })
+      } else {
+        Text('一切正常')
+          .fontSize(22)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(ControlCenterTheme.textPrimary)
+          .margin({ top: ControlCenterTheme.spaceSm })
       }
-      .layoutWeight(1)
-      .alignItems(HorizontalAlign.Start)
-      .margin({ left: 10 })
-    }
-    .layoutWeight(1)
-    .padding({ left: 14, right: 14, top: 14, bottom: 14 })
-    .borderRadius(ControlCenterTheme.radiusInner)
-    .backgroundColor(ControlCenterTheme.surfaceMuted)
-    .border({ width: 1, color: ControlCenterTheme.border })
-    .onClick(action)
-  }
-
-  @Builder buildOverviewSection() {
-    Column() {
-      SectionTitle({
-        title: '全屋概览',
-        subtitle: '房间、场景与离线设备一眼可见',
-        trailing: '实时同步'
-      })
-
+      Text('在线设备 ' + this.onlineCount.toString() + '/' + this.totalCount.toString() +
+        ' · 场景 ' + this.scenes.length.toString())
+        .fontSize(12)
+        .fontColor(ControlCenterTheme.textSecondary)
+        .margin({ top: ControlCenterTheme.spaceSm })
+      Text('室内温度 ' + this.temp + '°C · 空气湿度 ' + this.hum + '%')
+        .fontSize(12)
+        .fontColor(ControlCenterTheme.textSecondary)
+        .margin({ top: ControlCenterTheme.spaceXs })
       Row() {
-        MetricChip({ label: '房间数', value: this.rooms.length.toString(), tone: 'accent' }).layoutWeight(1)
-        Blank().width(10)
-        MetricChip({ label: '场景数', value: this.scenes.length.toString(), tone: 'warning' }).layoutWeight(1)
-        Blank().width(10)
-        MetricChip({ label: '离线设备', value: this.offlineCount().toString(), tone: this.offlineCount() > 0 ? 'danger' : 'success' }).layoutWeight(1)
+        Text(this.ok ? '实时连接正常' : '实时连接重连中')
+          .fontSize(12)
+          .fontColor(ControlCenterTheme.textPrimary)
+          .layoutWeight(1)
+        Button('数据监测')
+          .height(ControlCenterTheme.tapTarget)
+          .padding({ left: ControlCenterTheme.spaceMd, right: ControlCenterTheme.spaceMd })
+          .fontSize(12)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(ControlCenterTheme.accent)
+          .backgroundColor(ControlCenterTheme.surface)
+          .borderRadius(ControlCenterTheme.radiusInner)
+          .onClick(() => this.quickAction('pages/DataMonitorPage'))
       }
       .width('100%')
-      .margin({ top: 12 })
+      .alignItems(VerticalAlign.Center)
+      .margin({ top: ControlCenterTheme.spaceMd })
     }
     .width('100%')
-    .margin({ top: 20 })
+    .alignItems(HorizontalAlign.Start)
+    .padding(ControlCenterTheme.spaceLg)
+    .borderRadius(ControlCenterTheme.radiusCard)
+    .backgroundColor(ControlCenterTheme.accentSoft)
   }
 
   @Builder buildMijiaSceneStrip() {
@@ -930,7 +825,7 @@ struct DashboardPage {
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
         Text(this.exe === scene.id ? '执行中...' : DashboardHelper.sceneDescription(scene.description))
-          .fontSize(11)
+          .fontSize(12)
           .fontColor(ControlCenterTheme.textSecondary)
           .margin({ top: 5 })
           .maxLines(1)
@@ -946,68 +841,13 @@ struct DashboardPage {
     .backgroundColor(ControlCenterTheme.surface)
     .border({ width: 1, color: this.exe === scene.id ? ControlCenterTheme.accent : ControlCenterTheme.border })
     .margin({ right: 10, top: 12 })
-    .onClick(() => this.requestScene(scene.id))
-  }
-
-  @Builder buildSceneStrip() {
-    if (this.scenes.length > 0) {
-      Column() {
-        SectionTitle({
-          title: '快捷场景',
-          subtitle: '把常用联动做成一键操作',
-          trailing: this.scenes.length.toString() + ' 个'
-        })
-
-        Scroll() {
-          Row() {
-            ForEach(this.scenes, (scene: Scene) => {
-              Column() {
-                Row() {
-                  Text(this.sceneIcon(scene.name))
-                    .fontSize(24)
-                  Blank()
-                  if (this.exe === scene.id) {
-                    LoadingProgress()
-                      .width(18)
-                      .height(18)
-                      .color(ControlCenterTheme.accent)
-                  }
-                }
-                .width('100%')
-
-                Text(DashboardHelper.sceneName(scene.name))
-                  .fontSize(15)
-                  .fontWeight(FontWeight.Bold)
-                  .fontColor(ControlCenterTheme.textPrimary)
-                  .margin({ top: 16 })
-                  .maxLines(1)
-                  .textOverflow({ overflow: TextOverflow.Ellipsis })
-
-                Text(DashboardHelper.sceneDescription(scene.description))
-                  .fontSize(11)
-                  .fontColor(ControlCenterTheme.textSecondary)
-                  .margin({ top: 6 })
-                  .maxLines(2)
-                  .textOverflow({ overflow: TextOverflow.Ellipsis })
-              }
-              .width(172)
-              .padding(16)
-              .borderRadius(ControlCenterTheme.radiusCard)
-              .backgroundColor(this.exe === scene.id ? ControlCenterTheme.accentSoft : ControlCenterTheme.surface)
-              .border({ width: 1, color: this.exe === scene.id ? '#9DDCCB' : ControlCenterTheme.border })
-              .shadow({ radius: 18, color: ControlCenterTheme.shadowSoft, offsetY: 8 })
-              .margin({ right: 10, top: 12 })
-              .onClick(() => this.requestScene(scene.id))
-            }, (scene: Scene) => scene.id.toString())
-          }
-        }
-        .scrollable(ScrollDirection.Horizontal)
-        .scrollBar(BarState.Off)
-        .width('100%')
+    .enabled(this.exe < 0)
+    .opacity(this.exe < 0 ? 1 : 0.58)
+    .onClick(() => {
+      if (this.exe < 0) {
+        this.requestScene(scene.id)
       }
-      .width('100%')
-      .margin({ top: 20 })
-    }
+    })
   }
 
   @Builder buildRoomFilter() {
@@ -1088,7 +928,7 @@ struct DashboardPage {
                   Row() {
                     Circle({ width: 8, height: 8 }).fill(this.dotColor(device))
                     Text(device.online ? '在线' : '离线')
-                      .fontSize(10)
+                      .fontSize(12)
                       .fontColor(ControlCenterTheme.textSecondary)
                       .margin({ left: 6 })
                   }
@@ -1108,7 +948,7 @@ struct DashboardPage {
                 .textOverflow({ overflow: TextOverflow.Ellipsis })
 
               Text(this.roomName(device.room_id))
-                .fontSize(11)
+                .fontSize(12)
                 .fontColor(ControlCenterTheme.textTertiary)
                 .margin({ top: 4 })
                 .maxLines(1)
@@ -1121,17 +961,11 @@ struct DashboardPage {
                 .maxLines(2)
                 .textOverflow({ overflow: TextOverflow.Ellipsis })
 
-              Row() {
-                Text('进入控制')
-                  .fontSize(12)
-                  .fontColor(ControlCenterTheme.accent)
-                  .fontWeight(FontWeight.Bold)
-                Text('\u203A')
-                  .fontSize(14)
-                  .fontColor(ControlCenterTheme.accent)
-                  .margin({ left: 4 })
-              }
-              .margin({ top: 18 })
+              Text('进入控制')
+                .fontSize(12)
+                .fontColor(ControlCenterTheme.accent)
+                .fontWeight(FontWeight.Bold)
+                .margin({ top: 18 })
             }
             .padding(16)
             .borderRadius(ControlCenterTheme.radiusCard)
@@ -1167,7 +1001,7 @@ struct DashboardPage {
               .fontWeight(FontWeight.Medium)
               .fontColor(ControlCenterTheme.textPrimary)
             Text('设备指令、自动化和场景执行都会显示在这里。')
-              .fontSize(11)
+              .fontSize(12)
               .fontColor(ControlCenterTheme.textSecondary)
               .margin({ top: 4 })
           }
@@ -1183,7 +1017,7 @@ struct DashboardPage {
                   .fontWeight(FontWeight.Bold)
                   .fontColor(ControlCenterTheme.textPrimary)
                 Text(this.formatLogDetail(item))
-                  .fontSize(11)
+                  .fontSize(12)
                   .fontColor(ControlCenterTheme.textSecondary)
                   .margin({ top: 4 })
                   .maxLines(2)
@@ -1215,59 +1049,4 @@ struct DashboardPage {
     .margin({ top: 20 })
   }
 
-  @Builder buildMijiaBottomNav() {
-    Row() {
-      this.bottomTab('首页', '⌂', true, '')
-      this.bottomTab('设备', '▦', false, 'pages/DeviceManagePage')
-      this.bottomTab('自动化', '⌁', false, 'pages/RulesPage')
-      this.bottomTab('数据', '⌇', false, 'pages/DataMonitorPage')
-      this.bottomTab('我的', '◯', false, 'pages/ProfilePage')
-    }
-    .width('100%')
-    .margin({ top: 22 })
-    .padding({ left: 10, right: 10, top: 12, bottom: 12 })
-    .borderRadius(22)
-    .backgroundColor('#FFFFFFD8')
-    .shadow({ radius: 16, color: ControlCenterTheme.shadowSoft, offsetY: 6 })
-  }
-
-  @Builder buildBottomNav() {
-    Row() {
-      this.bottomTab('总览', '⌂', true, '')
-      this.bottomTab('灯光', '☼', false, 'pages/DeviceRemotePage')
-      this.bottomTab('空调', '❄', false, 'pages/DeviceRemotePage')
-      this.bottomTab('规则', '⌁', false, 'pages/RulesPage')
-      this.bottomTab('我的', '◯', false, 'pages/ProfilePage')
-    }
-    .width('100%')
-    .margin({ top: 22 })
-    .padding({ left: 10, right: 10, top: 12, bottom: 12 })
-    .borderRadius(22)
-    .backgroundColor('#FFFFFFD8')
-    .shadow({ radius: 16, color: ControlCenterTheme.shadowSoft, offsetY: 6 })
-  }
-
-  @Builder bottomTab(label: string, icon: string, active: boolean, url: string) {
-    Column() {
-      Text(icon)
-        .fontSize(17)
-        .fontColor(active ? ControlCenterTheme.accent : ControlCenterTheme.textSecondary)
-      Text(label)
-        .fontSize(11)
-        .fontColor(active ? ControlCenterTheme.accent : ControlCenterTheme.textSecondary)
-        .fontWeight(active ? FontWeight.Bold : FontWeight.Medium)
-    }
-    .layoutWeight(1)
-    .height(48)
-    .justifyContent(FlexAlign.Center)
-    .alignItems(HorizontalAlign.Center)
-    .borderRadius(16)
-    .backgroundColor(active ? ControlCenterTheme.accentSoft : '#00000000')
-    .onClick(() => {
-      if (!url) {
-        return
-      }
-      this.getUIContext().getRouter().pushUrl({ url: url })
-    })
-  }
 }

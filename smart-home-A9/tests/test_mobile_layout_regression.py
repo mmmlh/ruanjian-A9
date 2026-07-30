@@ -13,23 +13,29 @@ THEME_FILE = ROOT / "openharmony/entry/src/main/ets/common/ControlCenterTheme.et
 KIT_FILE = ROOT / "openharmony/entry/src/main/ets/common/ControlCenterKit.ets"
 
 
-def test_login_page_uses_scroll_and_mijia_style_brand_hierarchy():
+def test_login_page_uses_scroll_and_compact_shared_form_hierarchy():
     login_source = LOGIN_PAGE.read_text(encoding="utf-8")
-    theme_source = THEME_FILE.read_text(encoding="utf-8")
 
     assert "Scroll()" in login_source
     assert "Text('智居')" in login_source
     assert "Text('连接家的每一刻')" in login_source
-    assert "ControlCenterTheme.loginAccent" in login_source
-    assert "static readonly loginAccent: string = '#07C160'" in theme_source
-    assert "static readonly loginAccentSoft: string = '#E8F8EE'" in theme_source
-    assert "其他方式登录" not in login_source
+    assert "Text('用户名')" in login_source
+    assert "Text('密码')" in login_source
+    assert "ControlCenterTheme.pageBg" in login_source
+    assert "ControlCenterTheme.surfaceMuted" in login_source
+    assert "ControlCenterTheme.controlHeight" in login_source
 
 
-def test_dashboard_hero_does_not_render_four_top_action_buttons_anymore():
+def test_dashboard_uses_shared_top_bar_without_legacy_header_or_navigation():
     source = DASHBOARD_PAGE.read_text(encoding="utf-8")
 
-    assert source.count("this.heroIconButton(") <= 3
+    assert (
+        "AppTopBar({ title: '我的家', subtitle: this.syncStatusLabel(), "
+        "actionLabel: '刷新', onAction: () => this.rf() })" in source
+    )
+    assert "buildHomeHeader" not in source
+    assert "heroIconButton" not in source
+    assert "bottomTab" not in source
 
 
 def test_root_pages_use_the_shared_four_item_bottom_navigation_outside_scroll_content():
@@ -43,10 +49,24 @@ def test_root_pages_use_the_shared_four_item_bottom_navigation_outside_scroll_co
     assert "let selected = this.active === key" not in kit_source
     assert "this.getUIContext().getRouter().replaceUrl" in kit_source
     assert "try {" in kit_source.split("private navigate", 1)[1].split("@Builder", 1)[0]
+    for key, route in [
+        ("home", "pages/DashboardPage"),
+        ("devices", "pages/DeviceManagePage"),
+        ("automation", "pages/RulesPage"),
+        ("profile", "pages/ProfilePage"),
+    ]:
+        assert f"key === '{key}'" in kit_source
+        assert f"route = '{route}'" in kit_source
 
-    for path in (DASHBOARD_PAGE, DEVICE_MANAGE_PAGE, RULES_PAGE, PROFILE_PAGE):
+    expected_active = {
+        DASHBOARD_PAGE: "home",
+        DEVICE_MANAGE_PAGE: "devices",
+        RULES_PAGE: "automation",
+        PROFILE_PAGE: "profile",
+    }
+    for path, active in expected_active.items():
         source = path.read_text(encoding="utf-8")
-        assert "AppBottomNav" in source
+        assert f"AppBottomNav({{ active: '{active}' }})" in source
 
 
 def test_registration_page_uses_the_shared_visual_system_and_scrolls_with_keyboard():
@@ -55,6 +75,10 @@ def test_registration_page_uses_the_shared_visual_system_and_scrolls_with_keyboa
     assert "Scroll()" in source
     assert "ControlCenterTheme" in source
     assert "StatusBanner" in source
+    assert "Text('用户名')" in source
+    assert "Text('密码')" in source
+    assert "Text('确认密码')" in source
+    assert "ControlCenterTheme.controlHeight" in source
 
 
 def test_profile_account_switch_label_matches_the_logout_based_flow():

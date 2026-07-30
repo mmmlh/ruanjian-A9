@@ -2,11 +2,7 @@ import { getDevicesForUi, getRooms, updateDeviceName, deleteDevice, discoverDevi
 import { Room, Device, DiscoveredDevice } from '../model/DeviceModel'
 import { UiText } from '../common/UiText'
 import { ControlCenterTheme } from '../common/ControlCenterTheme'
-import { AppBottomNav } from '../common/ControlCenterKit'
-
-const DEVICE_ACTION_PRIMARY: string = '#111111'
-const DEVICE_ACTION_SECONDARY_BG: string = '#EEEEEE'
-const DEVICE_ACTION_SECONDARY_FG: string = '#111111'
+import { AppTopBar, AppBottomNav, StatusBanner, EmptyState, ConfirmPanel } from '../common/ControlCenterKit'
 
 function localizeMessage(message: string, fallback: string): string {
   if (!message) {
@@ -38,15 +34,15 @@ let DEV_TYPES: DevType[] = [
 class DeviceHelper {
   static icon(type: string): string {
     switch (type) {
-      case 'light': return '\uD83D\uDCA1'
-      case 'ac': return '\u2744\uFE0F'
-      case 'door_lock': return '\uD83D\uDD12'
-      case 'temperature_sensor': return '\uD83C\uDF21\uFE0F'
-      case 'humidity_sensor': return '\uD83D\uDCA7'
-      case 'pir_sensor': return '\uD83D\uDC63'
-      case 'curtain': return '\uD83E\uDE9B'
-      case 'humidifier': return '\u2728'
-      default: return '\uD83D\uDD0C'
+      case 'light': return '灯'
+      case 'ac': return '空'
+      case 'door_lock': return '锁'
+      case 'temperature_sensor': return '温'
+      case 'humidity_sensor': return '湿'
+      case 'pir_sensor': return '人'
+      case 'curtain': return '帘'
+      case 'humidifier': return '雾'
+      default: return '设'
     }
   }
 
@@ -115,6 +111,9 @@ struct DeviceManagePage {
   @State scanning: boolean = false
   @State binding: boolean = false
   @State showEdit: boolean = false
+  @State showAddFlow: boolean = false
+  @State pendingDeleteId: number = -1
+  @State deletingId: number = -1
   @State eid: number = -1
   @State en: string = ''
   @State eb: string = ''
@@ -137,7 +136,6 @@ struct DeviceManagePage {
       if (this.rooms.length > 0 && this.bindRoomId === 0) {
         this.bindRoomId = this.rooms[0].id
       }
-      await this.scanCandidates(false)
     } catch (err) {
       this.err = localizeMessage((err as Error).message, '加载设备列表失败')
     } finally {
@@ -146,6 +144,9 @@ struct DeviceManagePage {
   }
 
   async scanCandidates(showSuccess: boolean = true): Promise<void> {
+    if (this.scanning) {
+      return
+    }
     this.scanning = true
     try {
       this.discovered = await discoverDevices()
@@ -160,6 +161,11 @@ struct DeviceManagePage {
   }
 
   async doDel(id: number): Promise<void> {
+    if (this.deletingId >= 0) {
+      return
+    }
+    this.deletingId = id
+    this.pendingDeleteId = -1
     this.err = ''
     this.ok = ''
     try {
@@ -168,6 +174,8 @@ struct DeviceManagePage {
       await this.ld()
     } catch (err) {
       this.err = localizeMessage((err as Error).message, '删除设备失败')
+    } finally {
+      this.deletingId = -1
     }
   }
 
@@ -206,6 +214,9 @@ struct DeviceManagePage {
   }
 
   async doBind(candidate: DiscoveredDevice): Promise<void> {
+    if (this.binding) {
+      return
+    }
     this.err = ''
     this.ok = ''
     if (this.bindRoomId === 0) {
@@ -219,6 +230,9 @@ struct DeviceManagePage {
       this.bindTargetId = ''
       this.bindName = ''
       await this.ld()
+      if (this.showAddFlow === true) {
+        await this.scanCandidates(false)
+      }
     } catch (err) {
       this.err = localizeMessage((err as Error).message, '绑定设备失败')
     } finally {
@@ -230,41 +244,46 @@ struct DeviceManagePage {
     Scroll() {
       Row() {
         ForEach(this.rooms, (room: Room) => {
-          Column() {
-            Text(room.name).fontSize(11).fontColor(this.bindRoomId === room.id ? ControlCenterTheme.accent : ControlCenterTheme.textSecondary)
-              .padding({ left: 8, right: 8, top: 4, bottom: 4 }).borderRadius(6)
-              .backgroundColor(this.bindRoomId === room.id ? ControlCenterTheme.accentSoft : ControlCenterTheme.surfaceMuted).margin({ right: 6 })
-          }
-          .onClick(() => { this.bindRoomId = room.id })
+          Button(room.name)
+            .height(ControlCenterTheme.tapTarget)
+            .padding({ left: ControlCenterTheme.spaceMd, right: ControlCenterTheme.spaceMd })
+            .fontSize(12)
+            .fontWeight(this.bindRoomId === room.id ? FontWeight.Bold : FontWeight.Medium)
+            .fontColor(this.bindRoomId === room.id ? ControlCenterTheme.accent : ControlCenterTheme.textSecondary)
+            .borderRadius(ControlCenterTheme.radiusInner)
+            .backgroundColor(this.bindRoomId === room.id ? ControlCenterTheme.accentSoft : ControlCenterTheme.surfaceMuted)
+            .margin({ right: ControlCenterTheme.spaceSm })
+            .onClick(() => { this.bindRoomId = room.id })
         }, (room: Room) => room.id.toString())
       }
     }
-    .scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off).width('100%')
+    .scrollable(ScrollDirection.Horizontal)
+    .scrollBar(BarState.Off)
+    .width('100%')
   }
 
   build() {
-    Column() {
-      Row() {
-        Text('\u2190').fontSize(18).fontColor(ControlCenterTheme.textPrimary).padding(8).onClick(() => this.getUIContext().getRouter().back())
-        Text('设备管理').fontSize(17).fontWeight(FontWeight.Bold).fontColor(ControlCenterTheme.textPrimary)
-        Blank()
-        Text(this.scanning ? '扫描中...' : '扫描').fontSize(14).fontColor(ControlCenterTheme.accent).onClick(() => {
-          if (!this.scanning) {
-            this.scanCandidates()
-          }
-        })
-      }
-      .width('100%').height(48).padding({ left: 14, right: 14 }).alignItems(VerticalAlign.Center)
-      .backgroundColor(ControlCenterTheme.surface).border({ width: { bottom: 0.5 }, color: ControlCenterTheme.border })
+    Stack() {
+      Column() {
+        AppTopBar({ title: '设备', subtitle: this.devices.length.toString() + ' 台已绑定', actionLabel: '添加设备', actionType: 'add',
+        onAction: () => {
+          this.showAddFlow = true
+          this.scanCandidates(false)
+        }
+      })
+        .padding({ left: ControlCenterTheme.gutter, right: ControlCenterTheme.gutter,
+          top: ControlCenterTheme.spaceMd, bottom: ControlCenterTheme.spaceSm })
 
       if (this.ok) {
-        Text(this.ok).fontSize(13).fontColor(ControlCenterTheme.accent).padding(8).borderRadius(10)
-          .backgroundColor(ControlCenterTheme.accentSoft).margin({ top: 8, left: 14, right: 14 })
+        StatusBanner({ message: this.ok, detail: '设备列表已更新', tone: 'success' })
+          .margin({ top: ControlCenterTheme.spaceSm, left: ControlCenterTheme.gutter,
+            right: ControlCenterTheme.gutter })
       }
 
       if (this.err) {
-        Text(this.err).fontSize(13).fontColor('#A14D4D').padding(8).borderRadius(10)
-          .backgroundColor(ControlCenterTheme.dangerSoft).margin({ top: 8, left: 14, right: 14 })
+        StatusBanner({ message: this.err, detail: '请检查设置或网络连接', tone: 'danger' })
+          .margin({ top: ControlCenterTheme.spaceSm, left: ControlCenterTheme.gutter,
+            right: ControlCenterTheme.gutter })
       }
 
       if (this.loading) {
@@ -275,166 +294,397 @@ struct DeviceManagePage {
       } else {
         Scroll() {
           Column() {
-            Column() {
+            if (!this.showAddFlow) {
+              Column() {
               Row() {
-                Text('已绑定设备').fontSize(15).fontWeight(FontWeight.Bold).fontColor(ControlCenterTheme.textPrimary)
+                Text('已绑定设备')
+                  .fontSize(18)
+                  .fontWeight(FontWeight.Bold)
+                  .fontColor(ControlCenterTheme.textPrimary)
                 Blank()
-                Text(this.devices.length.toString()).fontSize(12).fontColor('#8C8C8C')
+                Text(this.devices.length.toString() + ' 台')
+                  .fontSize(12)
+                  .fontColor(ControlCenterTheme.textSecondary)
               }
-              .width('100%').margin({ bottom: 10 })
+              .width('100%')
+              .margin({ bottom: ControlCenterTheme.spaceMd })
 
               if (this.devices.length === 0) {
-                Column() {
-                  Text('当前还没有已绑定设备').fontSize(13).fontColor('#B0B0B0')
-                }
-                .width('100%').height(80).justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
+                EmptyState({
+                  title: '还没有已绑定设备',
+                  detail: '使用右上角的添加设备入口开始绑定。'
+                })
               } else {
                 ForEach(this.devices, (device: Device) => {
-                  Row() {
-                    Text(DeviceHelper.icon(device.type)).fontSize(22)
-                    Column() {
-                      Text(device.name).fontSize(14).fontWeight(FontWeight.Bold).fontColor('#3D3D3D')
-                      Row() {
-                        Text(DeviceHelper.typeLabel(device.type)).fontSize(11).fontColor('#8C8C8C')
-                        Text(' · ' + (device.room_name || '未分配房间')).fontSize(11).fontColor('#8C8C8C')
-                      }
-                      .margin({ top: 2 })
-                      Text(device.online ? '在线' : '离线').fontSize(11).fontColor(device.online ? '#8FBF7F' : '#D49595')
-                        .margin({ top: 4 })
-                      Text(DeviceHelper.summaryText(device.status_summary, '暂无最近状态')).fontSize(11).fontColor('#8C8C8C')
-                        .margin({ top: 2 }).maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
-                      Text(DeviceHelper.seenText(device.last_seen_at, '等待首次上报')).fontSize(10).fontColor('#B0B0B0')
-                        .margin({ top: 4 })
-                    }
-                    .layoutWeight(1).margin({ left: 12 }).alignItems(HorizontalAlign.Start)
-                    Text('编辑').fontSize(11).fontColor(DEVICE_ACTION_SECONDARY_FG).padding({ left: 8, right: 8, top: 5, bottom: 5 })
-                      .borderRadius(10).backgroundColor(DEVICE_ACTION_SECONDARY_BG).onClick(() => this.oe(device)).margin({ right: 6 })
-                    Text('删除').fontSize(11).fontColor('#FFFFFF').padding({ left: 8, right: 8, top: 5, bottom: 5 })
-                      .borderRadius(10).backgroundColor(DEVICE_ACTION_PRIMARY).onClick(() => this.doDel(device.id))
-                  }
-                  .width('100%').alignItems(VerticalAlign.Center).padding(12).borderRadius(10)
-                  .backgroundColor(ControlCenterTheme.surface).margin({ bottom: 8 })
-                }, (device: Device) => device.id.toString())
-              }
-            }
-            .padding(14).borderRadius(ControlCenterTheme.radiusCard).backgroundColor(ControlCenterTheme.surfaceMuted).margin({ left: 14, right: 14, top: 14 })
-
-            Column() {
-              Row() {
-                Text('候选设备').fontSize(15).fontWeight(FontWeight.Bold).fontColor(ControlCenterTheme.textPrimary)
-                Blank()
-                if (this.scanning) {
-                  LoadingProgress().width(18).height(18).color(ControlCenterTheme.accent)
-                } else {
-                  Text(this.discovered.length.toString()).fontSize(12).fontColor('#8C8C8C')
-                }
-              }
-              .width('100%').margin({ bottom: 10 })
-
-              if (this.rooms.length > 0) {
-                Text('绑定到房间').fontSize(12).fontColor('#8C8C8C').width('100%').margin({ bottom: 6 })
-                this.roomSelector()
-              }
-
-              if (this.discovered.length === 0) {
-                Column() {
-                  Text('当前没有可用的候选设备').fontSize(13).fontColor('#B0B0B0')
-                  Text('点击“扫描”刷新候选设备列表').fontSize(11).fontColor('#C0C0C0').margin({ top: 4 })
-                }
-                .width('100%').height(90).justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
-              } else {
-                ForEach(this.discovered, (candidate: DiscoveredDevice) => {
                   Column() {
                     Row() {
-                      Text(DeviceHelper.icon(candidate.type)).fontSize(22)
+                      Text(DeviceHelper.icon(device.type))
+                        .width(ControlCenterTheme.tapTarget)
+                        .height(ControlCenterTheme.tapTarget)
+                        .fontSize(18)
+                        .fontWeight(FontWeight.Bold)
+                        .fontColor(ControlCenterTheme.accent)
+                        .textAlign(TextAlign.Center)
+                        .padding({ top: ControlCenterTheme.spaceMd })
+                        .borderRadius(ControlCenterTheme.radiusInner)
+                        .backgroundColor(ControlCenterTheme.accentSoft)
                       Column() {
-                        Text(candidate.name).fontSize(14).fontWeight(FontWeight.Bold).fontColor('#3D3D3D')
-                        Row() {
-                          Text(DeviceHelper.typeLabel(candidate.type)).fontSize(11).fontColor('#8C8C8C')
-                          Text(' · ' + DeviceHelper.roomLabel(candidate)).fontSize(11).fontColor('#8C8C8C')
-                        }
-                        .margin({ top: 2 })
+                        Text(device.name)
+                          .fontSize(15)
+                          .fontWeight(FontWeight.Bold)
+                          .fontColor(ControlCenterTheme.textPrimary)
+                        Text(DeviceHelper.typeLabel(device.type) + ' · ' + (device.room_name || '未分配房间'))
+                          .fontSize(12)
+                          .fontColor(ControlCenterTheme.textSecondary)
+                          .margin({ top: ControlCenterTheme.spaceXs })
+                        Text(device.online ? '在线' : '离线')
+                          .fontSize(12)
+                          .fontWeight(FontWeight.Medium)
+                          .fontColor(device.online ? ControlCenterTheme.success : ControlCenterTheme.danger)
+                          .margin({ top: ControlCenterTheme.spaceXs })
                       }
-                      .layoutWeight(1).margin({ left: 12 }).alignItems(HorizontalAlign.Start)
-                      Text(candidate.online ? '在线' : '离线').fontSize(11).fontColor(candidate.online ? '#8FBF7F' : '#D49595')
-                        .padding({ left: 8, right: 8, top: 3, bottom: 3 }).borderRadius(4)
-                        .backgroundColor(candidate.online ? '#8FBF7F15' : '#D4959515')
+                      .layoutWeight(1)
+                      .margin({ left: ControlCenterTheme.spaceMd })
+                      .alignItems(HorizontalAlign.Start)
                     }
-                    .width('100%').alignItems(VerticalAlign.Center)
+                    .width('100%')
+                    .alignItems(VerticalAlign.Center)
 
-                    Text(DeviceHelper.summaryText(candidate.status_summary, '暂无最近状态')).fontSize(11).fontColor('#8C8C8C')
-                      .width('100%').margin({ top: 8 }).maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
-                    Text(DeviceHelper.seenText(candidate.last_seen_at, '刚刚发现')).fontSize(10).fontColor('#B0B0B0')
-                      .width('100%').margin({ top: 4 })
-
-                    TextInput({
-                      text: this.bindTargetId === candidate.id ? this.bindName : candidate.name,
-                      placeholder: '请输入设备显示名称'
-                    })
-                      .height(40).borderRadius(12).backgroundColor(ControlCenterTheme.surfaceMuted).fontSize(13)
-                      .padding({ left: 12 }).margin({ top: 10 })
-                      .onFocus(() => this.ob(candidate))
-                      .onChange((value: string) => {
-                        this.bindTargetId = candidate.id
-                        this.bindName = value
-                      })
+                    Text(DeviceHelper.summaryText(device.status_summary, '暂无最近状态'))
+                      .width('100%')
+                      .fontSize(12)
+                      .fontColor(ControlCenterTheme.textSecondary)
+                      .margin({ top: ControlCenterTheme.spaceMd })
+                      .maxLines(2)
+                      .textOverflow({ overflow: TextOverflow.Ellipsis })
+                    Text(DeviceHelper.seenText(device.last_seen_at, '等待首次上报'))
+                      .width('100%')
+                      .fontSize(11)
+                      .fontColor(ControlCenterTheme.textTertiary)
+                      .margin({ top: ControlCenterTheme.spaceXs })
 
                     Row() {
-                      Text(this.bindRoomId === 0 ? '请先选择绑定房间' : '将绑定到所选房间')
+                      Button('编辑')
+                        .layoutWeight(1)
+                        .height(ControlCenterTheme.tapTarget)
+                        .fontSize(13)
+                        .fontColor(ControlCenterTheme.textPrimary)
+                        .backgroundColor(ControlCenterTheme.surfaceMuted)
+                        .borderRadius(ControlCenterTheme.radiusInner)
+                        .enabled(this.deletingId < 0)
+                        .onClick(() => this.oe(device))
+                      Blank().width(ControlCenterTheme.spaceSm)
+                      Button(this.deletingId === device.id ? '删除中...' : '删除')
+                        .layoutWeight(1)
+                        .height(ControlCenterTheme.tapTarget)
+                        .fontSize(13)
+                        .fontColor(ControlCenterTheme.danger)
+                        .backgroundColor(ControlCenterTheme.dangerSoft)
+                        .borderRadius(ControlCenterTheme.radiusInner)
+                        .enabled(this.deletingId < 0)
+                        .onClick(() => { this.pendingDeleteId = device.id })
+                    }
+                    .width('100%')
+                    .margin({ top: ControlCenterTheme.spaceMd })
+                  }
+                  .width('100%')
+                  .padding(ControlCenterTheme.spaceLg)
+                  .borderRadius(ControlCenterTheme.radiusCard)
+                  .backgroundColor(ControlCenterTheme.surface)
+                  .border({ width: 1, color: ControlCenterTheme.border })
+                  .margin({ bottom: ControlCenterTheme.spaceSm })
+                }, (device: Device) => device.id.toString())
+              }
+              }
+              .width('100%')
+            }
+
+            if (this.showAddFlow) {
+              Column() {
+                Row() {
+                  Column() {
+                    Text('添加设备')
+                      .fontSize(18)
+                      .fontWeight(FontWeight.Bold)
+                      .fontColor(ControlCenterTheme.textPrimary)
+                    Text('选择候选设备并绑定到房间')
+                      .fontSize(12)
+                      .fontColor(ControlCenterTheme.textSecondary)
+                      .margin({ top: ControlCenterTheme.spaceXs })
+                  }
+                  .layoutWeight(1)
+                  .alignItems(HorizontalAlign.Start)
+                  Button('完成')
+                    .height(ControlCenterTheme.tapTarget)
+                    .padding({ left: ControlCenterTheme.spaceLg, right: ControlCenterTheme.spaceLg })
+                    .fontSize(13)
+                    .fontColor(ControlCenterTheme.textPrimary)
+                    .backgroundColor(ControlCenterTheme.surfaceMuted)
+                    .borderRadius(ControlCenterTheme.radiusInner)
+                    .onClick(() => { this.showAddFlow = false })
+                }
+                .width('100%')
+                .alignItems(VerticalAlign.Center)
+
+                Row() {
+                  Text('候选设备')
+                    .fontSize(15)
+                    .fontWeight(FontWeight.Bold)
+                    .fontColor(ControlCenterTheme.textPrimary)
+                  Text(this.discovered.length.toString() + ' 台')
+                    .fontSize(12)
+                    .fontColor(ControlCenterTheme.textSecondary)
+                    .margin({ left: ControlCenterTheme.spaceSm })
+                  Blank()
+                  Button(this.scanning ? '扫描中...' : '重新扫描')
+                    .height(ControlCenterTheme.tapTarget)
+                    .padding({ left: ControlCenterTheme.spaceMd, right: ControlCenterTheme.spaceMd })
+                    .fontSize(12)
+                    .fontColor(ControlCenterTheme.accent)
+                    .backgroundColor(ControlCenterTheme.accentSoft)
+                    .borderRadius(ControlCenterTheme.radiusInner)
+                    .enabled(!this.scanning)
+                    .onClick(() => this.scanCandidates())
+                }
+                .width('100%')
+                .alignItems(VerticalAlign.Center)
+                .margin({ top: ControlCenterTheme.spaceLg, bottom: ControlCenterTheme.spaceMd })
+
+                if (this.rooms.length > 0) {
+                  Text('绑定到房间')
+                    .width('100%')
+                    .fontSize(12)
+                    .fontWeight(FontWeight.Medium)
+                    .fontColor(ControlCenterTheme.textPrimary)
+                    .margin({ bottom: ControlCenterTheme.spaceSm })
+                  this.roomSelector()
+                } else {
+                  StatusBanner({ message: '暂无可用房间', detail: '请先创建房间再绑定设备', tone: 'warning' })
+                }
+
+                if (this.discovered.length === 0) {
+                  EmptyState({
+                    title: this.scanning ? '正在扫描候选设备' : '暂未发现候选设备',
+                    detail: this.scanning ? '发现结果会自动显示在这里。' : '确认设备在线后重新扫描。',
+                    actionLabel: this.scanning ? '扫描中...' : '重新扫描',
+                    actionEnabled: !this.scanning,
+                    onAction: () => this.scanCandidates()
+                  })
+                    .margin({ top: ControlCenterTheme.spaceMd })
+                } else {
+                  ForEach(this.discovered, (candidate: DiscoveredDevice) => {
+                    Column() {
+                      Row() {
+                        Text(DeviceHelper.icon(candidate.type))
+                          .width(ControlCenterTheme.tapTarget)
+                          .height(ControlCenterTheme.tapTarget)
+                          .fontSize(18)
+                          .fontWeight(FontWeight.Bold)
+                          .fontColor(ControlCenterTheme.accent)
+                          .textAlign(TextAlign.Center)
+                          .padding({ top: ControlCenterTheme.spaceMd })
+                          .borderRadius(ControlCenterTheme.radiusInner)
+                          .backgroundColor(ControlCenterTheme.accentSoft)
+                        Column() {
+                          Text(candidate.name)
+                            .fontSize(15)
+                            .fontWeight(FontWeight.Bold)
+                            .fontColor(ControlCenterTheme.textPrimary)
+                          Text(DeviceHelper.typeLabel(candidate.type) + ' · ' + DeviceHelper.roomLabel(candidate))
+                            .fontSize(12)
+                            .fontColor(ControlCenterTheme.textSecondary)
+                            .margin({ top: ControlCenterTheme.spaceXs })
+                        }
+                        .layoutWeight(1)
+                        .margin({ left: ControlCenterTheme.spaceMd })
+                        .alignItems(HorizontalAlign.Start)
+                        Text(candidate.online ? '在线' : '离线')
+                          .fontSize(12)
+                          .fontWeight(FontWeight.Medium)
+                          .fontColor(candidate.online ? ControlCenterTheme.success : ControlCenterTheme.danger)
+                      }
+                      .width('100%')
+                      .alignItems(VerticalAlign.Center)
+
+                      Text(DeviceHelper.summaryText(candidate.status_summary, '暂无最近状态'))
+                        .width('100%')
                         .fontSize(12)
                         .fontColor(ControlCenterTheme.textSecondary)
-                        .layoutWeight(1)
-                      Button(this.binding && this.bindTargetId === candidate.id ? '绑定中...' : '绑定')
-                        .height(ControlCenterTheme.tapTarget).fontSize(12).backgroundColor(DEVICE_ACTION_PRIMARY).fontColor('#FFFFFF')
-                        .borderRadius(12).enabled(!this.binding || this.bindTargetId !== candidate.id)
-                        .onClick(() => {
-                          this.ob(candidate)
-                          this.doBind(candidate)
+                        .margin({ top: ControlCenterTheme.spaceMd })
+                        .maxLines(2)
+                        .textOverflow({ overflow: TextOverflow.Ellipsis })
+                      Text(DeviceHelper.seenText(candidate.last_seen_at, '刚刚发现'))
+                        .width('100%')
+                        .fontSize(11)
+                        .fontColor(ControlCenterTheme.textTertiary)
+                        .margin({ top: ControlCenterTheme.spaceXs })
+
+                      Text('设备名称')
+                        .width('100%')
+                        .fontSize(12)
+                        .fontWeight(FontWeight.Medium)
+                        .fontColor(ControlCenterTheme.textPrimary)
+                        .margin({ top: ControlCenterTheme.spaceMd, bottom: ControlCenterTheme.spaceSm })
+                      TextInput({
+                        text: this.bindTargetId === candidate.id ? this.bindName : candidate.name,
+                        placeholder: '请输入设备显示名称'
+                      })
+                        .height(ControlCenterTheme.controlHeight)
+                        .borderRadius(ControlCenterTheme.radiusInner)
+                        .backgroundColor(ControlCenterTheme.surfaceMuted)
+                        .fontSize(14)
+                        .padding({ left: ControlCenterTheme.spaceMd, right: ControlCenterTheme.spaceMd })
+                        .onFocus(() => this.ob(candidate))
+                        .onChange((value: string) => {
+                          this.bindTargetId = candidate.id
+                          this.bindName = value
                         })
+
+                      Row() {
+                        Text(this.bindRoomId === 0 ? '请先选择绑定房间' : '将绑定到所选房间')
+                          .fontSize(12)
+                          .fontColor(ControlCenterTheme.textSecondary)
+                          .layoutWeight(1)
+                        Button(this.binding && this.bindTargetId === candidate.id ? '绑定中...' : '绑定')
+                          .height(ControlCenterTheme.tapTarget)
+                          .padding({ left: ControlCenterTheme.spaceLg, right: ControlCenterTheme.spaceLg })
+                          .fontSize(13)
+                          .fontColor(ControlCenterTheme.surface)
+                          .backgroundColor(ControlCenterTheme.accent)
+                          .borderRadius(ControlCenterTheme.radiusInner)
+                          .enabled(!this.binding)
+                          .onClick(() => {
+                            if (this.bindTargetId !== candidate.id) {
+                              this.ob(candidate)
+                            }
+                            this.doBind(candidate)
+                          })
+                      }
+                      .width('100%')
+                      .alignItems(VerticalAlign.Center)
+                      .margin({ top: ControlCenterTheme.spaceMd })
                     }
-                    .width('100%').alignItems(VerticalAlign.Center).margin({ top: 10 })
-                  }
-                  .padding(12).borderRadius(ControlCenterTheme.radiusInner).backgroundColor(ControlCenterTheme.surface).margin({ bottom: 8 })
-                }, (candidate: DiscoveredDevice) => candidate.id)
+                    .width('100%')
+                    .padding(ControlCenterTheme.spaceLg)
+                    .borderRadius(ControlCenterTheme.radiusCard)
+                    .backgroundColor(ControlCenterTheme.surface)
+                    .border({ width: 1, color: ControlCenterTheme.border })
+                    .margin({ top: ControlCenterTheme.spaceSm })
+                  }, (candidate: DiscoveredDevice) => candidate.id)
+                }
               }
+              .width('100%')
+              .margin({ top: ControlCenterTheme.spaceXl })
             }
-            .padding(14).borderRadius(ControlCenterTheme.radiusCard).backgroundColor(ControlCenterTheme.surfaceMuted).margin({ left: 14, right: 14, top: 14, bottom: 18 })
           }
+          .width('100%')
+          .padding({ left: ControlCenterTheme.gutter, right: ControlCenterTheme.gutter,
+            top: ControlCenterTheme.spaceMd, bottom: ControlCenterTheme.spaceXl })
         }
         .layoutWeight(1).scrollBar(BarState.Off)
       }
 
-      AppBottomNav({ active: 'devices' })
+        AppBottomNav({ active: 'devices' })
+      }
+      .width('100%')
+      .height('100%')
 
       if (this.showEdit) {
         this.Ed()
       }
+
+      if (this.pendingDeleteId > 0) {
+        Column() {
+          ConfirmPanel({
+            title: '删除设备？',
+            detail: '删除后需要重新添加并绑定该设备。',
+            confirmLabel: '确认删除',
+            cancelLabel: '取消',
+            onCancel: () => { this.pendingDeleteId = -1 },
+            onConfirm: () => this.doDel(this.pendingDeleteId)
+          })
+        }
+        .width('100%')
+        .height('100%')
+        .padding(ControlCenterTheme.gutter)
+        .justifyContent(FlexAlign.Center)
+        .alignItems(HorizontalAlign.Center)
+        .backgroundColor(ControlCenterTheme.overlay)
+      }
     }
-    .width('100%').height('100%').backgroundColor(ControlCenterTheme.pageBg)
+    .width('100%')
+    .height('100%')
+    .backgroundColor(ControlCenterTheme.pageBg)
   }
 
   @Builder Ed() {
     Column() {
       Column() {
-        Text('编辑设备').fontSize(16).fontWeight(FontWeight.Bold).fontColor(ControlCenterTheme.textPrimary)
-          .width('100%').textAlign(TextAlign.Center).margin({ bottom: 14 })
-        Text('名称').fontSize(12).fontColor('#8C8C8C').width('100%').margin({ bottom: 4 })
-        TextInput({ text: this.en, placeholder: '请输入设备名称' }).height(40).borderRadius(12).backgroundColor(ControlCenterTheme.surfaceMuted)
-          .fontSize(14).padding({ left: 12 }).onChange((v: string) => { this.en = v })
-        Text('品牌').fontSize(12).fontColor('#8C8C8C').width('100%').margin({ top: 10, bottom: 4 })
-        TextInput({ text: this.eb, placeholder: '选填' }).height(40).borderRadius(12).backgroundColor(ControlCenterTheme.surfaceMuted)
-          .fontSize(14).padding({ left: 12 }).onChange((v: string) => { this.eb = v })
+        Text('编辑设备')
+          .width('100%')
+          .fontSize(18)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(ControlCenterTheme.textPrimary)
+          .textAlign(TextAlign.Start)
+          .margin({ bottom: ControlCenterTheme.spaceLg })
+        Text('名称')
+          .width('100%')
+          .fontSize(12)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(ControlCenterTheme.textPrimary)
+          .margin({ bottom: ControlCenterTheme.spaceSm })
+        TextInput({ text: this.en, placeholder: '请输入设备名称' })
+          .height(ControlCenterTheme.controlHeight)
+          .borderRadius(ControlCenterTheme.radiusInner)
+          .backgroundColor(ControlCenterTheme.surfaceMuted)
+          .fontSize(14)
+          .padding({ left: ControlCenterTheme.spaceMd, right: ControlCenterTheme.spaceMd })
+          .onChange((v: string) => { this.en = v })
+        Text('品牌')
+          .width('100%')
+          .fontSize(12)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(ControlCenterTheme.textPrimary)
+          .margin({ top: ControlCenterTheme.spaceMd, bottom: ControlCenterTheme.spaceSm })
+        TextInput({ text: this.eb, placeholder: '选填' })
+          .height(ControlCenterTheme.controlHeight)
+          .borderRadius(ControlCenterTheme.radiusInner)
+          .backgroundColor(ControlCenterTheme.surfaceMuted)
+          .fontSize(14)
+          .padding({ left: ControlCenterTheme.spaceMd, right: ControlCenterTheme.spaceMd })
+          .onChange((v: string) => { this.eb = v })
         Row() {
-          Button('取消').width('45%').height(38).fontSize(13).backgroundColor(DEVICE_ACTION_SECONDARY_BG)
-            .fontColor(DEVICE_ACTION_SECONDARY_FG).borderRadius(12).onClick(() => { this.showEdit = false })
-          Button('保存').width('45%').height(38).fontSize(13).backgroundColor(DEVICE_ACTION_PRIMARY)
-            .fontColor('#FFFFFF').borderRadius(12).onClick(() => this.doSave())
+          Button('取消')
+            .layoutWeight(1)
+            .height(ControlCenterTheme.tapTarget)
+            .fontSize(13)
+            .fontColor(ControlCenterTheme.textPrimary)
+            .backgroundColor(ControlCenterTheme.surfaceMuted)
+            .borderRadius(ControlCenterTheme.radiusInner)
+            .onClick(() => { this.showEdit = false })
+          Blank().width(ControlCenterTheme.spaceSm)
+          Button('保存')
+            .layoutWeight(1)
+            .height(ControlCenterTheme.tapTarget)
+            .fontSize(13)
+            .fontColor(ControlCenterTheme.surface)
+            .backgroundColor(ControlCenterTheme.accent)
+            .borderRadius(ControlCenterTheme.radiusInner)
+            .onClick(() => this.doSave())
         }
-        .width('100%').justifyContent(FlexAlign.SpaceBetween).margin({ top: 14 })
+        .width('100%')
+        .margin({ top: ControlCenterTheme.spaceLg })
       }
-      .padding(18).borderRadius(ControlCenterTheme.radiusCard).backgroundColor(ControlCenterTheme.surface).width('85%')
+      .width('88%')
+      .padding(ControlCenterTheme.spaceLg)
+      .borderRadius(ControlCenterTheme.radiusCard)
+      .backgroundColor(ControlCenterTheme.surface)
     }
-    .width('100%').height('100%').justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
-    .backgroundColor('#40000000').onClick(() => { this.showEdit = false })
+    .width('100%')
+    .height('100%')
+    .justifyContent(FlexAlign.Center)
+    .alignItems(HorizontalAlign.Center)
+    .backgroundColor(ControlCenterTheme.overlay)
+    .onClick(() => { this.showEdit = false })
   }
 }
