@@ -10,7 +10,10 @@ from pydantic import BaseModel
 
 from app.api.auth import get_current_user
 from app.database.connection import get_db
-from app.services.device_command import execute_entity_command
+from app.services.device_command import (
+    PARAMETER_RANGES_BY_DEVICE_TYPE,
+    execute_entity_command,
+)
 from app.services.entity_state import META_ATTRIBUTE_KEYS, build_state, parse_entity_id
 
 router = APIRouter(prefix="/api/states", tags=["设备状态"])
@@ -25,6 +28,30 @@ class ServiceCallRequest(BaseModel):
 class StateUpdateRequest(BaseModel):
     state: Optional[str] = None
     attributes: Optional[dict[str, Any]] = None
+
+
+def _is_finite_number(value: Any) -> bool:
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return True
+    return isinstance(value, float) and math.isfinite(value)
+
+
+def _validate_state_attributes(device_type: str, attributes: dict[str, Any]) -> None:
+    for name, (minimum, maximum) in PARAMETER_RANGES_BY_DEVICE_TYPE.get(
+        device_type,
+        {},
+    ).items():
+        if name not in attributes:
+            continue
+        value = attributes[name]
+        if not _is_finite_number(value) or not minimum <= value <= maximum:
+            raise HTTPException(status_code=400, detail="invalid_state_value")
+
+    if device_type in {"temperature_sensor", "humidity_sensor"}:
+        if "value" in attributes and not _is_finite_number(attributes["value"]):
+            raise HTTPException(status_code=400, detail="invalid_state_value")
 
 
 @router.get("")
@@ -98,13 +125,19 @@ def set_state(entity_id: str, req: StateUpdateRequest, user: dict = Depends(get_
                 status["position"] = position
 
         if req.attributes is not None:
+            _validate_state_attributes(device["type"], req.attributes)
             for key, value in req.attributes.items():
                 if key not in META_ATTRIBUTE_KEYS:
                     status[key] = value
 
+        try:
+            serialized_status = json.dumps(status, allow_nan=False)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="invalid_state_value") from exc
+
         conn.execute(
             "UPDATE devices SET status_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-            (json.dumps(status), device_id),
+            (serialized_status, device_id),
         )
         updated = conn.execute(
             "SELECT d.*, r.name as room_name FROM devices d JOIN rooms r ON d.room_id = r.id WHERE d.id = ?",

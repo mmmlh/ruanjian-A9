@@ -307,6 +307,147 @@ class TestDevices:
         assert response.json()["detail"] == "invalid_state_value"
         assert after_status == before_status
 
+    @pytest.mark.parametrize(
+        ("entity_id", "attributes"),
+        [
+            ("curtain.device_15", {"position": 101}),
+            ("curtain.device_15", {"position": -1}),
+            ("curtain.device_15", {"position": "bad"}),
+            ("light.device_4", {"brightness": 101}),
+            ("light.device_4", {"brightness": -1}),
+            ("light.device_4", {"brightness": True}),
+            ("ac.device_5", {"temp": 31}),
+            ("ac.device_5", {"temp": 15}),
+            ("humidifier.device_17", {"level": 4}),
+            ("humidifier.device_17", {"level": 0}),
+            ("humidifier.device_17", {"target_humidity": 81}),
+            ("humidifier.device_17", {"target_humidity": 29}),
+            ("temperature_sensor.device_1", {"value": "bad"}),
+            ("humidity_sensor.device_2", {"value": False}),
+        ],
+    )
+    def test_state_attributes_reject_invalid_numeric_values_without_mutation(
+        self,
+        client,
+        auth_headers,
+        db,
+        entity_id,
+        attributes,
+    ):
+        device_id = int(entity_id.rsplit("_", 1)[1])
+        before_status = db.execute(
+            "SELECT status_json FROM devices WHERE id = ?", (device_id,)
+        ).fetchone()["status_json"]
+
+        response = client.post(
+            f"/api/states/{entity_id}",
+            json={"attributes": attributes},
+            headers=auth_headers,
+        )
+
+        after_status = db.execute(
+            "SELECT status_json FROM devices WHERE id = ?", (device_id,)
+        ).fetchone()["status_json"]
+        assert response.status_code == 400
+        assert response.json()["detail"] == "invalid_state_value"
+        assert after_status == before_status
+
+    @pytest.mark.parametrize(
+        "entity_id",
+        ["temperature_sensor.device_1", "humidity_sensor.device_2"],
+    )
+    def test_state_attributes_reject_non_finite_sensor_values_without_mutation(
+        self,
+        client,
+        auth_headers,
+        db,
+        entity_id,
+    ):
+        device_id = int(entity_id.rsplit("_", 1)[1])
+        before_status = db.execute(
+            "SELECT status_json FROM devices WHERE id = ?", (device_id,)
+        ).fetchone()["status_json"]
+        headers = {**auth_headers, "Content-Type": "application/json"}
+
+        response = client.post(
+            f"/api/states/{entity_id}",
+            content='{"attributes":{"value":1e309}}',
+            headers=headers,
+        )
+
+        after_status = db.execute(
+            "SELECT status_json FROM devices WHERE id = ?", (device_id,)
+        ).fetchone()["status_json"]
+        assert response.status_code == 400
+        assert response.json()["detail"] == "invalid_state_value"
+        assert after_status == before_status
+
+    def test_state_attributes_reject_nested_non_finite_business_value_without_mutation(
+        self,
+        client,
+        auth_headers,
+        db,
+    ):
+        before_status = db.execute(
+            "SELECT status_json FROM devices WHERE id = 4"
+        ).fetchone()["status_json"]
+        headers = {**auth_headers, "Content-Type": "application/json"}
+
+        response = client.post(
+            "/api/states/light.device_4",
+            content='{"attributes":{"business_data":{"reading":1e309}}}',
+            headers=headers,
+        )
+
+        after_status = db.execute(
+            "SELECT status_json FROM devices WHERE id = 4"
+        ).fetchone()["status_json"]
+        assert response.status_code == 400
+        assert response.json()["detail"] == "invalid_state_value"
+        assert after_status == before_status
+
+    @pytest.mark.parametrize(
+        ("entity_id", "attribute", "value"),
+        [
+            ("curtain.device_15", "position", 0),
+            ("curtain.device_15", "position", 100),
+            ("light.device_4", "brightness", 0),
+            ("light.device_4", "brightness", 100),
+            ("ac.device_5", "temp", 16),
+            ("ac.device_5", "temp", 30),
+            ("humidifier.device_17", "level", 1),
+            ("humidifier.device_17", "level", 3),
+            ("humidifier.device_17", "target_humidity", 30),
+            ("humidifier.device_17", "target_humidity", 80),
+            ("temperature_sensor.device_1", "value", -12.5),
+            ("humidity_sensor.device_2", "value", 55.5),
+        ],
+    )
+    def test_state_attributes_accept_numeric_boundaries(
+        self,
+        client,
+        auth_headers,
+        db,
+        entity_id,
+        attribute,
+        value,
+    ):
+        device_id = int(entity_id.rsplit("_", 1)[1])
+
+        response = client.post(
+            f"/api/states/{entity_id}",
+            json={"attributes": {attribute: value}},
+            headers=auth_headers,
+        )
+
+        stored = json.loads(
+            db.execute(
+                "SELECT status_json FROM devices WHERE id = ?", (device_id,)
+            ).fetchone()["status_json"]
+        )
+        assert response.status_code == 200
+        assert stored[attribute] == value
+
     @pytest.mark.parametrize("decrypted_payload", ["[]", "123", "null"])
     def test_decrypted_command_requires_object_without_side_effects(
         self,
@@ -580,6 +721,8 @@ class TestDevices:
             json={
                 "attributes": {
                     "brightness": 42,
+                    "color": "warm",
+                    "business_data": {"thresholds": [1, 2.5]},
                     "online": True,
                     "status_summary": "forged",
                 }
@@ -590,5 +733,7 @@ class TestDevices:
         assert response.status_code == 200
         stored = json.loads(db.execute("SELECT status_json FROM devices WHERE id = 4").fetchone()["status_json"])
         assert stored["brightness"] == 42
+        assert stored["color"] == "warm"
+        assert stored["business_data"] == {"thresholds": [1, 2.5]}
         assert "online" not in stored
         assert "status_summary" not in stored
