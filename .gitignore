@@ -1,0 +1,20 @@
+# DevEco Studio and local SDK configuration
+.idea/
+local.properties
+
+# Hvigor and analysis caches
+.hvigor/
+.appanalyzer/
+.sdk-proxy/
+
+# Build and test output
+**/build/
+.pytest_cache/
+
+# Logs and JVM crash reports
+*.log
+hs_err_pid*.log
+
+# OS metadata
+.DS_Store
+Thumbs.db

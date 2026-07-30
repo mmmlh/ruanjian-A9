@@ -1,0 +1,12 @@
+{
+  "src": [
+    "pages/LoginPage",
+    "pages/DashboardPage",
+    "pages/RegisterPage",
+    "pages/RulesPage",
+    "pages/ProfilePage",
+    "pages/DeviceManagePage",
+    "pages/DeviceRemotePage",
+    "pages/DataMonitorPage"
+  ]
+}

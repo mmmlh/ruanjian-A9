@@ -1,0 +1,24 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "智能家居设备控制"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "智能家居控制系统"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "智能家居"
+    },
+    {
+      "name": "EntryFormAbility_label",
+      "value": "智能家居卡片"
+    },
+    {
+      "name": "EntryFormAbility_desc",
+      "value": "智能家居设备状态桌面卡片"
+    }
+  ]
+}
