@@ -53,6 +53,16 @@ def normalize_and_validate_command(
         raise HTTPException(status_code=400, detail="invalid_command_params")
 
     normalized_params = dict(params)
+    if device_type == "door_lock" and canonical_action == "unlock":
+        auth_code = normalized_params.get("auth_code")
+        if not isinstance(auth_code, str) or not auth_code.strip():
+            raise HTTPException(status_code=400, detail="invalid_command_params")
+
+    if canonical_action in {"on", "off"} and "power" in normalized_params:
+        power = normalized_params["power"]
+        if not isinstance(power, str) or power != canonical_action:
+            raise HTTPException(status_code=400, detail="invalid_command_params")
+
     for name, (minimum, maximum) in PARAMETER_RANGES_BY_DEVICE_TYPE.get(device_type, {}).items():
         if name not in normalized_params:
             continue
@@ -61,6 +71,11 @@ def normalize_and_validate_command(
             raise HTTPException(status_code=400, detail="invalid_command_params")
         if not minimum <= value <= maximum:
             raise HTTPException(status_code=400, detail="invalid_command_params")
+
+    try:
+        json.dumps(normalized_params, allow_nan=False)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="invalid_command_params") from exc
 
     return canonical_action, normalized_params
 
@@ -95,9 +110,10 @@ def apply_command_to_status(device_type: str, current_status: dict[str, Any], ac
             status["power"] = "on"
         elif normalized_action in {"off", "turn_off"}:
             status["power"] = "off"
-        if "power" in params:
+            status["brightness"] = 0
+        elif "power" in params:
             status["power"] = params["power"]
-        if "brightness" in params:
+        if normalized_action not in {"off", "turn_off"} and "brightness" in params:
             status["brightness"] = params["brightness"]
         if "color" in params:
             status["color"] = params["color"]
@@ -107,7 +123,9 @@ def apply_command_to_status(device_type: str, current_status: dict[str, Any], ac
             status["power"] = "on"
         elif normalized_action in {"off", "turn_off"}:
             status["power"] = "off"
-        for key in ("power", "mode", "temp", "fan"):
+        elif "power" in params:
+            status["power"] = params["power"]
+        for key in ("mode", "temp", "fan"):
             if key in params:
                 status[key] = params[key]
 
@@ -132,7 +150,9 @@ def apply_command_to_status(device_type: str, current_status: dict[str, Any], ac
             status["power"] = "on"
         elif normalized_action in {"off", "turn_off"}:
             status["power"] = "off"
-        for key in ("power", "level", "target_humidity"):
+        elif "power" in params:
+            status["power"] = params["power"]
+        for key in ("level", "target_humidity"):
             if key in params:
                 status[key] = params[key]
 
@@ -141,7 +161,9 @@ def apply_command_to_status(device_type: str, current_status: dict[str, Any], ac
             status["power"] = "on"
         elif normalized_action in {"off", "turn_off"}:
             status["power"] = "off"
-        for key in ("power", "power_watts", "total_kwh"):
+        elif "power" in params:
+            status["power"] = params["power"]
+        for key in ("power_watts", "total_kwh"):
             if key in params:
                 status[key] = params[key]
 

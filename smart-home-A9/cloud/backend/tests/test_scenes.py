@@ -155,6 +155,51 @@ class TestScenes:
 
         assert response.status_code == 200
 
+    def test_create_scene_rejects_nested_non_finite_params_without_side_effects(
+        self,
+        client,
+        auth_headers,
+        db,
+        monkeypatch,
+    ):
+        actions_json = (
+            '[{"device_type":"light","room_id":"livingroom","action":"on",'
+            '"params":{"metadata":{"reading":1e309}}}]'
+        )
+        published = []
+        monkeypatch.setattr(
+            scenes_api.mqtt_client,
+            "publish_message",
+            lambda topic, payload: published.append((topic, payload)),
+        )
+        before_scenes = db.execute("SELECT COUNT(*) FROM scenes").fetchone()[0]
+        before_status = db.execute(
+            "SELECT status_json FROM devices WHERE id = 4"
+        ).fetchone()["status_json"]
+        before_logs = db.execute(
+            "SELECT COUNT(*) FROM device_log WHERE device_id = 4"
+        ).fetchone()[0]
+
+        response = client.post(
+            "/api/scenes",
+            json={"name": "Non-finite scene", "actions_json": actions_json},
+            headers=auth_headers,
+        )
+
+        after_scenes = db.execute("SELECT COUNT(*) FROM scenes").fetchone()[0]
+        after_status = db.execute(
+            "SELECT status_json FROM devices WHERE id = 4"
+        ).fetchone()["status_json"]
+        after_logs = db.execute(
+            "SELECT COUNT(*) FROM device_log WHERE device_id = 4"
+        ).fetchone()[0]
+        assert response.status_code == 400
+        assert response.json()["detail"] == "invalid_scene_actions"
+        assert published == []
+        assert after_scenes == before_scenes
+        assert after_status == before_status
+        assert after_logs == before_logs
+
     def test_scene_without_room_id_keeps_source_and_executes_in_livingroom(
         self,
         client,

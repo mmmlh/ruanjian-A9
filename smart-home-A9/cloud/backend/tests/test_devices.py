@@ -182,14 +182,35 @@ class TestDevices:
         assert response.status_code == 404
 
     @pytest.mark.parametrize(
-        ("device_id", "command"),
+        ("device_id", "command", "expected_detail"),
         [
-            (4, {"action": "destroy", "params": {}}),
-            (4, {"action": "set", "params": {"brightness": 101}}),
-            (5, {"action": "set", "params": {"temp": 31}}),
-            (15, {"action": "set", "params": {"position": "bad"}}),
+            (4, {"action": "destroy", "params": {}}, "unsupported_device_action"),
+            (4, {"action": "set", "params": {"brightness": 101}}, "invalid_command_params"),
+            (5, {"action": "set", "params": {"temp": 31}}, "invalid_command_params"),
+            (15, {"action": "set", "params": {"position": "bad"}}, "invalid_command_params"),
+            (6, {"action": "unlock", "params": {}}, "invalid_command_params"),
+            (6, {"action": "unlock", "params": {"auth_code": ""}}, "invalid_command_params"),
+            (6, {"action": "unlock", "params": {"auth_code": 123}}, "invalid_command_params"),
+            (6, {"action": "open", "params": {}}, "invalid_command_params"),
+            (6, {"action": "open", "params": {"auth_code": ""}}, "invalid_command_params"),
+            (6, {"action": "open", "params": {"auth_code": 123}}, "invalid_command_params"),
+            (4, {"action": "on", "params": {"power": "off"}}, "invalid_command_params"),
+            (4, {"action": "off", "params": {"power": "on"}}, "invalid_command_params"),
         ],
-        ids=["unsupported-action", "brightness-too-high", "temperature-too-high", "position-not-numeric"],
+        ids=[
+            "unsupported-action",
+            "brightness-too-high",
+            "temperature-too-high",
+            "position-not-numeric",
+            "unlock-missing-auth",
+            "unlock-empty-auth",
+            "unlock-non-string-auth",
+            "open-missing-auth",
+            "open-empty-auth",
+            "open-non-string-auth",
+            "on-with-power-off",
+            "off-with-power-on",
+        ],
     )
     def test_invalid_command_has_no_side_effects(
         self,
@@ -199,6 +220,7 @@ class TestDevices:
         monkeypatch,
         device_id,
         command,
+        expected_detail,
     ):
         published = []
         monkeypatch.setattr(
@@ -226,9 +248,69 @@ class TestDevices:
             "SELECT COUNT(*) FROM device_log WHERE device_id = ?", (device_id,)
         ).fetchone()[0]
         assert response.status_code == 400
+        assert response.json()["detail"] == expected_detail
         assert published == []
         assert after_logs == before_logs
         assert after_status == before_status
+
+    def test_command_rejects_nested_non_finite_params_without_side_effects(
+        self,
+        client,
+        auth_headers,
+        db,
+        monkeypatch,
+    ):
+        published = []
+        monkeypatch.setattr(
+            device_command_service,
+            "publish_message",
+            lambda topic, payload: published.append((topic, payload)),
+        )
+        before_status = db.execute(
+            "SELECT status_json FROM devices WHERE id = 4"
+        ).fetchone()["status_json"]
+        before_logs = db.execute(
+            "SELECT COUNT(*) FROM device_log WHERE device_id = 4"
+        ).fetchone()[0]
+        headers = {**auth_headers, "Content-Type": "application/json"}
+
+        response = client.post(
+            "/api/devices/4/command",
+            content='{"action":"set","params":{"metadata":{"reading":1e309}}}',
+            headers=headers,
+        )
+
+        after_status = db.execute(
+            "SELECT status_json FROM devices WHERE id = 4"
+        ).fetchone()["status_json"]
+        after_logs = db.execute(
+            "SELECT COUNT(*) FROM device_log WHERE device_id = 4"
+        ).fetchone()[0]
+        assert response.status_code == 400
+        assert response.json()["detail"] == "invalid_command_params"
+        assert published == []
+        assert after_logs == before_logs
+        assert after_status == before_status
+
+    def test_turning_off_light_resets_brightness(self, client, auth_headers, db):
+        db.execute(
+            "UPDATE devices SET status_json = ? WHERE id = 4",
+            ('{"power":"on","brightness":80}',),
+        )
+        db.commit()
+
+        response = client.post(
+            "/api/devices/4/command",
+            json={"action": "off", "params": {"brightness": 60}},
+            headers=auth_headers,
+        )
+
+        stored = json.loads(
+            db.execute("SELECT status_json FROM devices WHERE id = 4").fetchone()["status_json"]
+        )
+        assert response.status_code == 200
+        assert stored["power"] == "off"
+        assert stored["brightness"] == 0
 
     @pytest.mark.parametrize(
         ("device_id", "action", "params", "canonical_action"),
@@ -236,7 +318,7 @@ class TestDevices:
             (4, "turn_on", {}, "on"),
             (4, "turn_off", {}, "off"),
             (4, "set_brightness", {"brightness": 75}, "set"),
-            (6, "open", {}, "unlock"),
+            (6, "open", {"auth_code": "alias-auth-code"}, "unlock"),
             (6, "close", {}, "lock"),
         ],
     )
