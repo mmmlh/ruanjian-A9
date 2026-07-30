@@ -99,6 +99,20 @@ def ensure_schema(conn: sqlite3.Connection):
         )
 
 
+def ensure_device_constraints(conn: sqlite3.Connection):
+    duplicate_rows = conn.execute(
+        "SELECT mqtt_topic FROM devices "
+        "GROUP BY mqtt_topic HAVING COUNT(*) > 1 ORDER BY mqtt_topic"
+    ).fetchall()
+    if duplicate_rows:
+        topics = ", ".join(str(row[0]) for row in duplicate_rows)
+        raise RuntimeError(f"duplicate mqtt_topic values: {topics}")
+
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_devices_mqtt_topic ON devices(mqtt_topic)"
+    )
+
+
 def create_tables(conn: sqlite3.Connection):
     """创建所有表"""
     conn.executescript("""
@@ -196,6 +210,8 @@ def seed_data(conn: sqlite3.Connection):
     if count > 0:
         repair_legacy_rule_payloads(conn)
         repair_home_scene_payload(conn)
+        ensure_device_constraints(conn)
+        conn.commit()
         return
 
     # ── 默认用户 admin/admin123 ──
@@ -354,3 +370,5 @@ def seed_data(conn: sqlite3.Connection):
     )
 
     repair_legacy_rule_payloads(conn)
+    ensure_device_constraints(conn)
+    conn.commit()

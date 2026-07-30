@@ -2,6 +2,7 @@
 Home Assistant style device state API: /api/states
 """
 import json
+import math
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -43,8 +44,9 @@ def get_state(entity_id: str, user: dict = Depends(get_current_user)):
 
     with get_db() as conn:
         row = conn.execute(
-            "SELECT d.*, r.name as room_name FROM devices d JOIN rooms r ON d.room_id = r.id WHERE d.id = ?",
-            (parsed[1],),
+            "SELECT d.*, r.name as room_name FROM devices d JOIN rooms r ON d.room_id = r.id "
+            "WHERE d.id = ? AND d.type = ?",
+            (parsed[1], parsed[0]),
         ).fetchone()
 
     if row is None:
@@ -61,7 +63,10 @@ def set_state(entity_id: str, req: StateUpdateRequest, user: dict = Depends(get_
     device_id = parsed[1]
 
     with get_db() as conn:
-        row = conn.execute("SELECT * FROM devices WHERE id = ?", (device_id,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM devices WHERE id = ? AND type = ?",
+            (device_id, parsed[0]),
+        ).fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail="设备不存在")
 
@@ -74,11 +79,23 @@ def set_state(entity_id: str, req: StateUpdateRequest, user: dict = Depends(get_
             elif device["type"] == "door_lock":
                 status["locked"] = req.state == "locked"
             elif device["type"] in {"temperature_sensor", "humidity_sensor"}:
-                status["value"] = float(req.state)
+                try:
+                    value = float(req.state)
+                except (TypeError, ValueError) as exc:
+                    raise HTTPException(status_code=400, detail="invalid_state_value") from exc
+                if not math.isfinite(value):
+                    raise HTTPException(status_code=400, detail="invalid_state_value")
+                status["value"] = value
             elif device["type"] == "pir_sensor":
                 status["presence"] = req.state == "on"
             elif device["type"] == "curtain":
-                status["position"] = int(req.state)
+                try:
+                    position = int(req.state)
+                except (TypeError, ValueError) as exc:
+                    raise HTTPException(status_code=400, detail="invalid_state_value") from exc
+                if not 0 <= position <= 100:
+                    raise HTTPException(status_code=400, detail="invalid_state_value")
+                status["position"] = position
 
         if req.attributes is not None:
             for key, value in req.attributes.items():

@@ -18,9 +18,55 @@ SUPPORTED_ACTIONS_BY_DEVICE_TYPE: dict[str, tuple[str, ...]] = {
     "smart_plug": ("on", "off", "set"),
 }
 
+ACTION_ALIASES_BY_DEVICE_TYPE: dict[str, dict[str, str]] = {
+    "light": {"turn_on": "on", "turn_off": "off", "set_brightness": "set"},
+    "ac": {"turn_on": "on", "turn_off": "off"},
+    "door_lock": {"open": "unlock", "close": "lock"},
+    "humidifier": {"turn_on": "on", "turn_off": "off"},
+    "smart_plug": {"turn_on": "on", "turn_off": "off"},
+}
 
-def decode_command_payload(action: str, params: dict[str, Any] | None, user: dict) -> tuple[str, dict[str, Any]]:
-    if params and "encrypted" in params:
+PARAMETER_RANGES_BY_DEVICE_TYPE: dict[str, dict[str, tuple[float, float]]] = {
+    "light": {"brightness": (0, 100)},
+    "ac": {"temp": (16, 30)},
+    "curtain": {"position": (0, 100)},
+    "humidifier": {"level": (1, 3), "target_humidity": (30, 80)},
+}
+
+
+def normalize_and_validate_command(
+    device_type: str,
+    action: str,
+    params: Any,
+) -> tuple[str, dict[str, Any]]:
+    if not isinstance(action, str):
+        raise HTTPException(status_code=400, detail="unsupported_device_action")
+
+    requested_action = action.strip().lower()
+    canonical_action = ACTION_ALIASES_BY_DEVICE_TYPE.get(device_type, {}).get(
+        requested_action,
+        requested_action,
+    )
+    if canonical_action not in SUPPORTED_ACTIONS_BY_DEVICE_TYPE.get(device_type, ()):
+        raise HTTPException(status_code=400, detail="unsupported_device_action")
+    if not isinstance(params, dict):
+        raise HTTPException(status_code=400, detail="invalid_command_params")
+
+    normalized_params = dict(params)
+    for name, (minimum, maximum) in PARAMETER_RANGES_BY_DEVICE_TYPE.get(device_type, {}).items():
+        if name not in normalized_params:
+            continue
+        value = normalized_params[name]
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise HTTPException(status_code=400, detail="invalid_command_params")
+        if not minimum <= value <= maximum:
+            raise HTTPException(status_code=400, detail="invalid_command_params")
+
+    return canonical_action, normalized_params
+
+
+def decode_command_payload(action: str, params: Any, user: dict) -> tuple[str, Any]:
+    if isinstance(params, dict) and "encrypted" in params:
         aes_key = user.get("aes_key", "")
         if not aes_key:
             raise HTTPException(status_code=400, detail="密钥未配置")
@@ -30,11 +76,14 @@ def decode_command_payload(action: str, params: dict[str, Any] | None, user: dic
         except Exception as exc:  # pragma: no cover - exact crypto failures are covered elsewhere
             raise HTTPException(status_code=400, detail=f"解密失败: {str(exc)}") from exc
 
+        if not isinstance(decrypted_cmd, dict):
+            raise HTTPException(status_code=400, detail="invalid_command_params")
+
         actual_action = decrypted_cmd.get("action", action)
         actual_params = decrypted_cmd.get("params", {})
-        return actual_action, dict(actual_params)
+        return actual_action, actual_params
 
-    return action, dict(params or {})
+    return action, {} if params is None else params
 
 
 def apply_command_to_status(device_type: str, current_status: dict[str, Any], action: str, params: dict[str, Any]) -> dict[str, Any]:
@@ -76,7 +125,7 @@ def apply_command_to_status(device_type: str, current_status: dict[str, Any], ac
         elif normalized_action == "close":
             status["position"] = 0
         elif "position" in params:
-            status["position"] = int(params["position"])
+            status["position"] = params["position"]
 
     elif device_type == "humidifier":
         if normalized_action in {"on", "turn_on"}:
@@ -123,8 +172,13 @@ def execute_device_command(
         if expected_device_type and device["type"] != expected_device_type:
             raise HTTPException(status_code=404, detail="entity_id_not_found")
 
-        actual_action, actual_params = decode_command_payload(action, params, user)
-        payload = {"action": actual_action, **actual_params}
+        decoded_action, decoded_params = decode_command_payload(action, params, user)
+        actual_action, actual_params = normalize_and_validate_command(
+            device["type"],
+            decoded_action,
+            decoded_params,
+        )
+        payload = {**actual_params, "action": actual_action}
         current_status = json.loads(device.get("status_json") or "{}")
         next_status = apply_command_to_status(device["type"], current_status, actual_action, actual_params)
 

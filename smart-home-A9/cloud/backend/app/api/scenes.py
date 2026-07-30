@@ -4,12 +4,13 @@
 import json
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
-from typing import Optional
+from typing import Any, Optional
 
 from app.database.connection import get_db
 from app.api.auth import get_current_user
 from app.services import mqtt_client
 from app.services.activity_log import write_activity
+from app.services.device_command import normalize_and_validate_command
 
 router = APIRouter(prefix="/api/scenes", tags=["场景管理"])
 
@@ -28,6 +29,84 @@ class SceneUpdate(BaseModel):
     actions_json: Optional[str] = None
 
 
+def parse_scene_actions(raw: str, status_code: int = 400) -> list[dict[str, Any]]:
+    try:
+        actions = json.loads(raw)
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise HTTPException(status_code=status_code, detail="invalid_scene_actions") from exc
+
+    if not isinstance(actions, list):
+        raise HTTPException(status_code=status_code, detail="invalid_scene_actions")
+
+    parsed_actions: list[dict[str, Any]] = []
+    for action in actions:
+        if not isinstance(action, dict):
+            raise HTTPException(status_code=status_code, detail="invalid_scene_actions")
+
+        device_type = action.get("device_type")
+        device_id = action.get("device_id")
+        action_name = action.get("action")
+        params = action.get("params", {})
+        has_device_type = isinstance(device_type, str) and bool(device_type.strip())
+        has_device_id = (
+            isinstance(device_id, int)
+            and not isinstance(device_id, bool)
+            and device_id > 0
+        )
+        if "device_type" in action and not has_device_type:
+            raise HTTPException(status_code=status_code, detail="invalid_scene_actions")
+        if "device_id" in action and not has_device_id:
+            raise HTTPException(status_code=status_code, detail="invalid_scene_actions")
+        if has_device_type and has_device_id:
+            raise HTTPException(status_code=status_code, detail="invalid_scene_actions")
+        if not has_device_type and not has_device_id:
+            raise HTTPException(status_code=status_code, detail="invalid_scene_actions")
+        if not isinstance(action_name, str) or not action_name.strip():
+            raise HTTPException(status_code=status_code, detail="invalid_scene_actions")
+        if not isinstance(params, dict):
+            raise HTTPException(status_code=status_code, detail="invalid_scene_actions")
+
+        room_id = action.get("room_id")
+        if "room_id" in action and (not isinstance(room_id, str) or not room_id.strip()):
+            raise HTTPException(status_code=status_code, detail="invalid_scene_actions")
+
+        mqtt_topic = None
+        if has_device_type:
+            validated_device_type = device_type.strip()
+        else:
+            with get_db() as conn:
+                device = conn.execute(
+                    "SELECT type, mqtt_topic FROM devices WHERE id = ?",
+                    (device_id,),
+                ).fetchone()
+            if device is None:
+                raise HTTPException(status_code=status_code, detail="invalid_scene_actions")
+            validated_device_type = device["type"]
+            mqtt_topic = f"{device['mqtt_topic']}/command"
+
+        try:
+            canonical_action, normalized_params = normalize_and_validate_command(
+                validated_device_type,
+                action_name,
+                params,
+            )
+        except HTTPException as exc:
+            raise HTTPException(status_code=status_code, detail="invalid_scene_actions") from exc
+
+        parsed_action = dict(action)
+        parsed_action.pop("_mqtt_topic", None)
+        parsed_action["device_type"] = validated_device_type
+        parsed_action["action"] = canonical_action
+        parsed_action["params"] = normalized_params
+        if "room_id" in action:
+            parsed_action["room_id"] = room_id.strip()
+        if mqtt_topic is not None:
+            parsed_action["_mqtt_topic"] = mqtt_topic
+        parsed_actions.append(parsed_action)
+
+    return parsed_actions
+
+
 @router.get("")
 def list_scenes(user: dict = Depends(get_current_user)):
     """场景列表"""
@@ -40,10 +119,7 @@ def list_scenes(user: dict = Depends(get_current_user)):
 def create_scene(req: SceneCreate, user: dict = Depends(get_current_user)):
     """创建场景"""
     # 校验 actions_json
-    try:
-        json.loads(req.actions_json)
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="actions_json 格式错误，需要有效 JSON")
+    parse_scene_actions(req.actions_json)
 
     with get_db() as conn:
         conn.execute(
@@ -76,10 +152,7 @@ def update_scene(scene_id: int, req: SceneUpdate, user: dict = Depends(get_curre
 
         # 校验 actions_json
         if "actions_json" in updates:
-            try:
-                json.loads(updates["actions_json"])
-            except json.JSONDecodeError:
-                raise HTTPException(status_code=400, detail="actions_json 格式错误")
+            parse_scene_actions(updates["actions_json"])
 
         if not updates:
             return dict(scene)
@@ -109,10 +182,7 @@ def execute_scene(scene_id: int, user: dict = Depends(get_current_user)):
         if scene is None:
             raise HTTPException(status_code=404, detail="场景不存在")
 
-    try:
-        actions = json.loads(scene["actions_json"])
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=500, detail="场景动作数据格式错误")
+    actions = parse_scene_actions(scene["actions_json"], status_code=409)
 
     executed = []
     for action in actions:
@@ -121,9 +191,10 @@ def execute_scene(scene_id: int, user: dict = Depends(get_current_user)):
         action_name = action.get("action")
         params = action.get("params", {})
 
-        topic = f"home/{target_room}/{device_type}/command"
+        topic = action.get("_mqtt_topic") or f"home/{target_room}/{device_type}/command"
         payload = {"action": action_name}
         payload.update(params)
+        payload["action"] = action_name
 
         mqtt_client.publish_message(topic, json.dumps(payload))
         executed.append({"topic": topic, "action": action_name})

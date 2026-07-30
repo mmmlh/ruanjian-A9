@@ -6,6 +6,8 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
+import pytest
+
 import app.services.device_command as device_command_service
 from app.main import on_mqtt_message
 
@@ -178,6 +180,249 @@ class TestDevices:
     def test_send_command_device_not_found(self, client, auth_headers):
         response = client.post("/api/devices/999/command", json={"action": "on"}, headers=auth_headers)
         assert response.status_code == 404
+
+    @pytest.mark.parametrize(
+        ("device_id", "command"),
+        [
+            (4, {"action": "destroy", "params": {}}),
+            (4, {"action": "set", "params": {"brightness": 101}}),
+            (5, {"action": "set", "params": {"temp": 31}}),
+            (15, {"action": "set", "params": {"position": "bad"}}),
+        ],
+        ids=["unsupported-action", "brightness-too-high", "temperature-too-high", "position-not-numeric"],
+    )
+    def test_invalid_command_has_no_side_effects(
+        self,
+        client,
+        auth_headers,
+        db,
+        monkeypatch,
+        device_id,
+        command,
+    ):
+        published = []
+        monkeypatch.setattr(
+            device_command_service,
+            "publish_message",
+            lambda topic, payload: published.append((topic, payload)),
+        )
+        before_status = db.execute(
+            "SELECT status_json FROM devices WHERE id = ?", (device_id,)
+        ).fetchone()["status_json"]
+        before_logs = db.execute(
+            "SELECT COUNT(*) FROM device_log WHERE device_id = ?", (device_id,)
+        ).fetchone()[0]
+
+        response = client.post(
+            f"/api/devices/{device_id}/command",
+            json=command,
+            headers=auth_headers,
+        )
+
+        after_status = db.execute(
+            "SELECT status_json FROM devices WHERE id = ?", (device_id,)
+        ).fetchone()["status_json"]
+        after_logs = db.execute(
+            "SELECT COUNT(*) FROM device_log WHERE device_id = ?", (device_id,)
+        ).fetchone()[0]
+        assert response.status_code == 400
+        assert published == []
+        assert after_logs == before_logs
+        assert after_status == before_status
+
+    @pytest.mark.parametrize(
+        ("device_id", "action", "params", "canonical_action"),
+        [
+            (4, "turn_on", {}, "on"),
+            (4, "turn_off", {}, "off"),
+            (4, "set_brightness", {"brightness": 75}, "set"),
+            (6, "open", {}, "unlock"),
+            (6, "close", {}, "lock"),
+        ],
+    )
+    def test_compatible_command_aliases_publish_canonical_actions(
+        self,
+        client,
+        auth_headers,
+        monkeypatch,
+        device_id,
+        action,
+        params,
+        canonical_action,
+    ):
+        published = []
+        monkeypatch.setattr(
+            device_command_service,
+            "publish_message",
+            lambda topic, payload: published.append((topic, json.loads(payload))),
+        )
+
+        response = client.post(
+            f"/api/devices/{device_id}/command",
+            json={"action": action, "params": params},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200
+        assert response.json()["success"] is True
+        assert response.json()["payload"]["action"] == canonical_action
+        assert published[0][1]["action"] == canonical_action
+        for name, value in params.items():
+            assert response.json()["payload"][name] == value
+            assert published[0][1][name] == value
+
+    @pytest.mark.parametrize(
+        ("entity_id", "state"),
+        [
+            ("curtain.device_15", "bad"),
+            ("temperature_sensor.device_1", "bad"),
+            ("temperature_sensor.device_1", "nan"),
+            ("temperature_sensor.device_1", "inf"),
+            ("humidity_sensor.device_2", "bad"),
+        ],
+    )
+    def test_state_write_rejects_invalid_numeric_state_without_mutation(
+        self,
+        client,
+        auth_headers,
+        db,
+        entity_id,
+        state,
+    ):
+        device_id = int(entity_id.rsplit("_", 1)[1])
+        before_status = db.execute(
+            "SELECT status_json FROM devices WHERE id = ?", (device_id,)
+        ).fetchone()["status_json"]
+
+        response = client.post(
+            f"/api/states/{entity_id}",
+            json={"state": state},
+            headers=auth_headers,
+        )
+
+        after_status = db.execute(
+            "SELECT status_json FROM devices WHERE id = ?", (device_id,)
+        ).fetchone()["status_json"]
+        assert response.status_code == 400
+        assert response.json()["detail"] == "invalid_state_value"
+        assert after_status == before_status
+
+    @pytest.mark.parametrize("decrypted_payload", ["[]", "123", "null"])
+    def test_decrypted_command_requires_object_without_side_effects(
+        self,
+        client,
+        auth_headers,
+        db,
+        monkeypatch,
+        decrypted_payload,
+    ):
+        from app.services.security import aes_encrypt, decode_token
+
+        token = auth_headers["Authorization"].split(" ", 1)[1]
+        aes_key = decode_token(token)["aes_key"]
+        published = []
+        monkeypatch.setattr(
+            device_command_service,
+            "publish_message",
+            lambda topic, payload: published.append((topic, payload)),
+        )
+        before_status = db.execute(
+            "SELECT status_json FROM devices WHERE id = 4"
+        ).fetchone()["status_json"]
+        before_logs = db.execute(
+            "SELECT COUNT(*) FROM device_log WHERE device_id = 4"
+        ).fetchone()[0]
+
+        response = client.post(
+            "/api/devices/4/command",
+            json={
+                "action": "on",
+                "params": {"encrypted": aes_encrypt(decrypted_payload, aes_key)},
+            },
+            headers=auth_headers,
+        )
+
+        after_status = db.execute(
+            "SELECT status_json FROM devices WHERE id = 4"
+        ).fetchone()["status_json"]
+        after_logs = db.execute(
+            "SELECT COUNT(*) FROM device_log WHERE device_id = 4"
+        ).fetchone()[0]
+        assert response.status_code == 400
+        assert published == []
+        assert after_status == before_status
+        assert after_logs == before_logs
+
+    @pytest.mark.parametrize("method", ["get", "post"])
+    def test_state_endpoint_rejects_entity_type_mismatch(self, client, auth_headers, method):
+        if method == "get":
+            response = client.get("/api/states/door_lock.device_4", headers=auth_headers)
+        else:
+            response = client.post(
+                "/api/states/door_lock.device_4",
+                json={"state": "locked"},
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 404
+
+    def test_create_device_rejects_duplicate_mqtt_topic(self, client, auth_headers, db):
+        topic = "home/livingroom/light"
+        before_count = db.execute(
+            "SELECT COUNT(*) FROM devices WHERE mqtt_topic = ?", (topic,)
+        ).fetchone()[0]
+
+        response = client.post(
+            "/api/devices",
+            json={
+                "room_id": 1,
+                "type": "light",
+                "name": "Duplicate light",
+                "mqtt_topic": topic,
+            },
+            headers=auth_headers,
+        )
+
+        after_count = db.execute(
+            "SELECT COUNT(*) FROM devices WHERE mqtt_topic = ?", (topic,)
+        ).fetchone()[0]
+        assert response.status_code == 409
+        assert response.json()["detail"] == "mqtt_topic_already_exists"
+        assert before_count == 1
+        assert after_count == before_count
+
+    def test_init_db_rejects_existing_duplicate_mqtt_topics(self, client, db):
+        from app.database.connection import init_db
+
+        topic = "home/livingroom/light"
+        db.execute("DROP INDEX IF EXISTS ux_devices_mqtt_topic")
+        db.execute(
+            "INSERT INTO devices (room_id, type, name, mqtt_topic) VALUES (?, ?, ?, ?)",
+            (1, "light", "Duplicate legacy light", topic),
+        )
+        db.commit()
+
+        with pytest.raises(RuntimeError, match=topic):
+            init_db()
+
+        count = db.execute(
+            "SELECT COUNT(*) FROM devices WHERE mqtt_topic = ?", (topic,)
+        ).fetchone()[0]
+        assert count == 2
+
+    def test_delete_device_with_history_preserves_device_and_log(self, client, auth_headers, db):
+        db.execute(
+            "INSERT INTO device_log (device_id, action, detail, user_id) VALUES (?, ?, ?, ?)",
+            (4, "on", "{}", 1),
+        )
+        db.commit()
+
+        response = client.delete("/api/devices/4", headers=auth_headers)
+
+        assert response.status_code == 409
+        assert response.json()["detail"] == "device_has_history"
+        assert db.execute("SELECT COUNT(*) FROM devices WHERE id = 4").fetchone()[0] == 1
+        assert db.execute("SELECT COUNT(*) FROM device_log WHERE device_id = 4").fetchone()[0] == 1
 
     def test_service_call_returns_changed_state_list_and_ui_message(self, client, auth_headers):
         response = client.post(

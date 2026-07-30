@@ -5,6 +5,7 @@ import json
 
 import pytest
 
+from app.api import scenes as scenes_api
 from app.database import init_db
 
 
@@ -110,6 +111,170 @@ class TestScenes:
         }, headers=auth_headers)
         assert r.status_code == 400
 
+    @pytest.mark.parametrize("actions_json", ["123", "{}", '["bad"]'])
+    def test_create_scene_rejects_non_action_lists(self, client, auth_headers, actions_json):
+        response = client.post(
+            "/api/scenes",
+            json={"name": "Invalid scene", "actions_json": actions_json},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "invalid_scene_actions"
+
+    @pytest.mark.parametrize(
+        "action",
+        [
+            {"action": "on", "params": {}},
+            {"device_type": "", "action": "on", "params": {}},
+            {"device_type": "light", "action": "", "params": {}},
+            {"device_type": "light", "action": "on", "params": []},
+            {"device_type": "light", "room_id": "", "action": "on", "params": {}},
+            {"device_type": "light", "action": "destroy", "params": {}},
+            {"device_id": 0, "action": "on", "params": {}},
+            {"device_id": True, "action": "on", "params": {}},
+            {"device_type": "light", "device_id": 5, "action": "on", "params": {}},
+        ],
+    )
+    def test_create_scene_rejects_invalid_action_fields(self, client, auth_headers, action):
+        response = client.post(
+            "/api/scenes",
+            json={"name": "Invalid scene", "actions_json": json.dumps([action])},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "invalid_scene_actions"
+
+    def test_create_scene_accepts_empty_action_list(self, client, auth_headers):
+        response = client.post(
+            "/api/scenes",
+            json={"name": "Empty scene", "actions_json": "[]"},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200
+
+    def test_scene_without_room_id_keeps_source_and_executes_in_livingroom(
+        self,
+        client,
+        auth_headers,
+        monkeypatch,
+    ):
+        actions_json = '[{"device_type":"light","action":"on","params":{}}]'
+        published = []
+        monkeypatch.setattr(
+            scenes_api.mqtt_client,
+            "publish_message",
+            lambda topic, payload: published.append((topic, json.loads(payload))),
+        )
+        created = client.post(
+            "/api/scenes",
+            json={"name": "Default room", "actions_json": actions_json},
+            headers=auth_headers,
+        )
+        assert created.status_code == 200
+
+        scene_id = created.json()["id"]
+        detail = client.get(f"/api/scenes/{scene_id}", headers=auth_headers)
+        executed = client.post(f"/api/scenes/{scene_id}/execute", headers=auth_headers)
+
+        assert detail.status_code == 200
+        assert detail.json()["actions_json"] == actions_json
+        assert executed.status_code == 200
+        assert published == [("home/livingroom/light/command", {"action": "on"})]
+
+    def test_scene_accepts_legacy_device_id_targets(self, client, auth_headers, monkeypatch):
+        actions = [
+            {
+                "device_id": 4,
+                "action": "set_brightness",
+                "params": {"brightness": 30},
+            },
+            {
+                "device_id": 5,
+                "action": "set",
+                "params": {"mode": "cool", "temperature": 25},
+            },
+        ]
+        actions_json = json.dumps(actions, separators=(",", ":"))
+        published = []
+        monkeypatch.setattr(
+            scenes_api.mqtt_client,
+            "publish_message",
+            lambda topic, payload: published.append((topic, json.loads(payload))),
+        )
+
+        created = client.post(
+            "/api/scenes",
+            json={"name": "Legacy targets", "actions_json": actions_json},
+            headers=auth_headers,
+        )
+        assert created.status_code == 200
+
+        scene_id = created.json()["id"]
+        detail = client.get(f"/api/scenes/{scene_id}", headers=auth_headers)
+        executed = client.post(f"/api/scenes/{scene_id}/execute", headers=auth_headers)
+
+        assert detail.status_code == 200
+        assert detail.json()["actions_json"] == actions_json
+        assert executed.status_code == 200
+        assert published == [
+            ("home/livingroom/light/command", {"action": "set", "brightness": 30}),
+            (
+                "home/livingroom/ac/command",
+                {"action": "set", "mode": "cool", "temperature": 25},
+            ),
+        ]
+
+    def test_scene_ignores_user_supplied_internal_mqtt_topic(
+        self,
+        client,
+        auth_headers,
+        monkeypatch,
+    ):
+        actions_json = json.dumps(
+            [
+                {
+                    "device_type": "light",
+                    "room_id": "livingroom",
+                    "action": "on",
+                    "params": {},
+                    "_mqtt_topic": "attacker/override",
+                }
+            ]
+        )
+        published = []
+        monkeypatch.setattr(
+            scenes_api.mqtt_client,
+            "publish_message",
+            lambda topic, payload: published.append((topic, json.loads(payload))),
+        )
+        created = client.post(
+            "/api/scenes",
+            json={"name": "Reserved field", "actions_json": actions_json},
+            headers=auth_headers,
+        )
+        assert created.status_code == 200
+
+        response = client.post(
+            f"/api/scenes/{created.json()['id']}/execute",
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200
+        assert published == [("home/livingroom/light/command", {"action": "on"})]
+
+    def test_update_scene_rejects_invalid_actions(self, client, auth_headers):
+        response = client.put(
+            "/api/scenes/1",
+            json={"actions_json": "{}"},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "invalid_scene_actions"
+
     def test_update_scene(self, client, auth_headers):
         r = client.put("/api/scenes/1", json={
             "name": "回家模式-Pro",
@@ -139,3 +304,25 @@ class TestScenes:
     def test_execute_nonexistent_scene(self, client, auth_headers):
         r = client.post("/api/scenes/999/execute", headers=auth_headers)
         assert r.status_code == 404
+
+    def test_execute_scene_rejects_historical_invalid_actions_without_publish(
+        self,
+        client,
+        auth_headers,
+        db,
+        monkeypatch,
+    ):
+        published = []
+        monkeypatch.setattr(
+            scenes_api.mqtt_client,
+            "publish_message",
+            lambda topic, payload: published.append((topic, payload)),
+        )
+        db.execute("UPDATE scenes SET actions_json = ? WHERE id = 1", ("123",))
+        db.commit()
+
+        response = client.post("/api/scenes/1/execute", headers=auth_headers)
+
+        assert response.status_code == 409
+        assert response.json()["detail"] == "invalid_scene_actions"
+        assert published == []

@@ -49,6 +49,12 @@ class TestSensorData:
         r = client.get("/api/data/sensors?limit=5", headers=auth_headers)
         assert r.status_code == 200
 
+    @pytest.mark.parametrize("limit", [0, -1, 1001])
+    def test_sensor_limit_must_be_between_one_and_one_thousand(self, client, auth_headers, limit):
+        response = client.get(f"/api/data/sensors?limit={limit}", headers=auth_headers)
+
+        assert response.status_code == 422
+
 
 class TestDeviceLogs:
     """设备操作日志测试"""
@@ -106,3 +112,9 @@ class TestDeviceLogs:
         items = response.json()
         assert items
         assert all(item["event_type"] == "scene" for item in items)
+
+    @pytest.mark.parametrize("limit", [0, -1, 1001])
+    def test_log_limit_must_be_between_one_and_one_thousand(self, client, auth_headers, limit):
+        response = client.get(f"/api/data/logs?limit={limit}", headers=auth_headers)
+
+        assert response.status_code == 422

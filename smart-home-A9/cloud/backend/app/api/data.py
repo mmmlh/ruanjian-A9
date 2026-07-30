@@ -16,7 +16,7 @@ def get_sensor_data(
     data_type: Optional[str] = None,
     start: Optional[str] = None,
     end: Optional[str] = None,
-    limit: int = Query(100, le=1000),
+    limit: int = Query(100, ge=1, le=1000),
     user: dict = Depends(get_current_user),
 ):
     """传感器历史数据"""
@@ -48,7 +48,7 @@ def get_device_logs(
     user_id: Optional[int] = None,
     start: Optional[str] = None,
     end: Optional[str] = None,
-    limit: int = Query(100, le=1000),
+    limit: int = Query(100, ge=1, le=1000),
     user: dict = Depends(get_current_user),
 ):
     """设备操作日志"""

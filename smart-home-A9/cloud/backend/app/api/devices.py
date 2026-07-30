@@ -1,6 +1,7 @@
 """
 Device management plus legacy command endpoint.
 """
+import sqlite3
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -93,10 +94,17 @@ def create_device(req: DeviceCreate, user: dict = Depends(get_current_user)):
         room = conn.execute("SELECT id FROM rooms WHERE id = ?", (req.room_id,)).fetchone()
         if room is None:
             raise HTTPException(status_code=404, detail="房间不存在")
-        conn.execute(
-            "INSERT INTO devices (room_id, type, name, brand, mqtt_topic, status_json) VALUES (?, ?, ?, ?, ?, '{}')",
-            (req.room_id, req.type, req.name, req.brand or "", req.mqtt_topic),
-        )
+        try:
+            conn.execute(
+                "INSERT INTO devices (room_id, type, name, brand, mqtt_topic, status_json) "
+                "VALUES (?, ?, ?, ?, ?, '{}')",
+                (req.room_id, req.type, req.name, req.brand or "", req.mqtt_topic),
+            )
+        except sqlite3.IntegrityError as exc:
+            conn.rollback()
+            if "devices.mqtt_topic" in str(exc):
+                raise HTTPException(status_code=409, detail="mqtt_topic_already_exists") from exc
+            raise
         device_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
     return {"id": device_id, "room_id": req.room_id, "type": req.type, "name": req.name, "success": True}
 
@@ -107,5 +115,11 @@ def delete_device(device_id: int, user: dict = Depends(get_current_user)):
         row = conn.execute("SELECT id FROM devices WHERE id = ?", (device_id,)).fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail="设备不存在")
-        conn.execute("DELETE FROM devices WHERE id = ?", (device_id,))
+        try:
+            conn.execute("DELETE FROM devices WHERE id = ?", (device_id,))
+        except sqlite3.IntegrityError as exc:
+            conn.rollback()
+            if "FOREIGN KEY" in str(exc):
+                raise HTTPException(status_code=409, detail="device_has_history") from exc
+            raise
     return {"success": True, "device_id": device_id}
