@@ -34,6 +34,7 @@ function localizeSuccessMessage(message: string, fallback: string): string {
 struct DeviceRemotePage {
   @State dt: string = ''
   @State ds: Device[] = []
+  @State roomDevices: Device[] = []
   @State ix: number = 0
   @State loading: boolean = false
   @State commandBusy: boolean = false
@@ -58,6 +59,7 @@ struct DeviceRemotePage {
   private dlT: number = -1
   private dlMT: number = -1
   private sliderTimer: number = -1
+  private environmentTimer: number = -1
 
   @State ctPs: number = 0
 
@@ -76,6 +78,7 @@ struct DeviceRemotePage {
       this.pendingDeviceId = params['deviceId'] as number
     }
     this.load()
+    this.startEnvironmentRefresh()
   }
 
   aboutToDisappear(): void {
@@ -83,6 +86,10 @@ struct DeviceRemotePage {
     if (this.sliderTimer > 0) {
       clearTimeout(this.sliderTimer)
       this.sliderTimer = -1
+    }
+    if (this.environmentTimer > 0) {
+      clearInterval(this.environmentTimer)
+      this.environmentTimer = -1
     }
     if (this.dlMT > 0) {
       clearTimeout(this.dlMT)
@@ -108,6 +115,49 @@ struct DeviceRemotePage {
   currentOnline(): boolean {
     let current = this.cur()
     return current !== null && current.online
+  }
+
+  async refreshRoomEnvironment(): Promise<void> {
+    let current = this.cur()
+    if (!current) {
+      return
+    }
+    try {
+      this.roomDevices = await getDevicesForUi(current.room_id)
+    } catch (_) {
+      // Keep the last valid room readings when the periodic refresh fails.
+    }
+  }
+
+  startEnvironmentRefresh(): void {
+    if (this.environmentTimer > 0) {
+      clearInterval(this.environmentTimer)
+    }
+    this.environmentTimer = setInterval(() => {
+      this.refreshRoomEnvironment()
+    }, 5000)
+  }
+
+  roomSensorValue(type: string, suffix: string, unavailable: string): string {
+    for (let i = 0; i < this.roomDevices.length; i++) {
+      let sensor = this.roomDevices[i]
+      if (sensor.type !== type) {
+        continue
+      }
+      let status = parseDeviceStatus(sensor.status_json)
+      if (status.value > 0) {
+        return status.value.toString() + suffix
+      }
+    }
+    return unavailable
+  }
+
+  roomTemperature(): string {
+    return this.roomSensorValue('temperature_sensor', '°C', '温度未采集')
+  }
+
+  roomHumidity(): string {
+    return this.roomSensorValue('humidity_sensor', '%', '湿度未采集')
   }
 
   async load(): Promise<void> {
@@ -176,6 +226,7 @@ struct DeviceRemotePage {
       this.huLv = status.level || 2
       this.huTg = status.target_humidity || 60
     }
+    this.refreshRoomEnvironment()
   }
 
   async cmd(id: number, action: string, params?: Object): Promise<void> {
@@ -217,18 +268,10 @@ struct DeviceRemotePage {
     if (!current || this.commandBusy) {
       return
     }
-    if (!current.online) {
-      this.errorMessage = '设备当前离线，请恢复连接后再发送指令。'
-      return
-    }
     await this.cmd(current.id, action, params)
   }
 
   queueSliderCommand(deviceId: number, action: string, params: CommandParams): void {
-    if (!this.currentOnline()) {
-      this.errorMessage = '设备当前离线，请恢复连接后再发送指令。'
-      return
-    }
     if (this.sliderTimer > 0) {
       clearTimeout(this.sliderTimer)
     }
@@ -256,6 +299,10 @@ struct DeviceRemotePage {
     if (this.dt === 'curtain') return '开合位置 ' + this.ctPs + '%'
     if (this.dt === 'humidifier') return this.huOn ? '正在加湿' : '加湿器已关闭'
     return '设备就绪'
+  }
+
+  currentStatusLabel(): string {
+    return this.stateLabel() + ' · ' + this.roomTemperature() + ' · ' + this.roomHumidity()
   }
 
   primaryMetric(): string {
@@ -434,20 +481,12 @@ struct DeviceRemotePage {
   }
 
   @Builder buildFeedback() {
-    if (!this.loading && this.ds.length > 0 && !this.currentOnline()) {
-      StatusBanner({
-        message: '设备当前离线，请恢复连接后再发送指令。',
-        detail: '控制按钮已受保护',
-        tone: 'warning'
-      }).margin({ top: 14 })
-    }
-
     if (this.successMessage) {
       StatusBanner({
         message: this.successMessage,
         detail: '状态已刷新',
         tone: 'success'
-      }).margin({ top: (!this.loading && this.ds.length > 0 && !this.currentOnline()) ? 8 : 14 })
+      }).margin({ top: 14 })
     }
 
     if (this.errorMessage) {
@@ -455,7 +494,7 @@ struct DeviceRemotePage {
         message: this.errorMessage,
         detail: '请重试或检查设备在线状态',
         tone: 'danger'
-      }).margin({ top: (this.successMessage || (!this.loading && this.ds.length > 0 && !this.currentOnline())) ? 8 : 14 })
+      }).margin({ top: this.successMessage ? 8 : 14 })
     }
   }
 
@@ -474,7 +513,7 @@ struct DeviceRemotePage {
         .fontWeight(FontWeight.Bold)
         .fontColor(ControlCenterTheme.textPrimary)
         .margin({ top: 14 })
-      Text(this.stateLabel())
+      Text(this.currentStatusLabel())
         .fontSize(13)
         .fontColor(ControlCenterTheme.accent)
         .margin({ top: 6 })
@@ -491,7 +530,7 @@ struct DeviceRemotePage {
         .fontColor(ControlCenterTheme.textPrimary)
         .width('100%')
         .margin({ top: 20 })
-      Text(this.currentOnline() ? '设备在线，可立即执行控制指令' : '设备离线，控制按钮已保护')
+      Text(this.currentOnline() ? '设备在线，可立即执行控制指令' : '设备离线，指令将尝试下发')
         .fontSize(12)
         .fontColor(ControlCenterTheme.textSecondary)
         .width('100%')
@@ -525,7 +564,7 @@ struct DeviceRemotePage {
             .fontSize(21)
             .fontWeight(FontWeight.Bold)
             .fontColor(ControlCenterTheme.textPrimary)
-          Text(this.stateLabel())
+          Text(this.currentStatusLabel())
             .fontSize(12)
             .fontColor(ControlCenterTheme.textSecondary)
             .margin({ top: 5 })
@@ -557,9 +596,17 @@ struct DeviceRemotePage {
       .width('100%')
       .margin({ top: 18 })
 
+      Row() {
+        MetricChip({ label: '室内温度', value: this.roomTemperature(), tone: 'accent' }).layoutWeight(1)
+        Blank().width(10)
+        MetricChip({ label: '室内湿度', value: this.roomHumidity(), tone: 'warning' }).layoutWeight(1)
+      }
+      .width('100%')
+      .margin({ top: 10 })
+
       StatusBanner({
-        message: this.currentOnline() ? '当前设备可立即控制' : '等待设备重新上线',
-        detail: this.currentOnline() ? '关键操作已解锁' : '系统已阻止无效写入',
+        message: this.currentOnline() ? '当前设备可立即控制' : '设备离线，仍可尝试控制',
+        detail: this.currentOnline() ? '关键操作已解锁' : '指令将通过 MQTT 下发',
         tone: this.currentOnline() ? 'success' : 'warning'
       }).margin({ top: 18 })
     }
@@ -611,7 +658,7 @@ struct DeviceRemotePage {
       .backgroundColor(color)
       .fontColor('#FFFFFF')
       .borderRadius(18)
-      .enabled(this.currentOnline() && !this.commandBusy)
+      .enabled(!this.commandBusy)
       .margin({ top: 14 })
       .onClick(action)
   }
@@ -626,7 +673,7 @@ struct DeviceRemotePage {
       .backgroundColor(bg)
       .fontColor(fg)
       .borderRadius(16)
-      .enabled(this.currentOnline() && !this.commandBusy)
+      .enabled(!this.commandBusy)
       .onClick(action)
   }
 

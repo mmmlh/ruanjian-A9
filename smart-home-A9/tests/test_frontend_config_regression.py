@@ -20,6 +20,15 @@ def test_default_server_url_has_single_source_of_truth():
     assert storage_source.count("8.162.10.179") == 1
 
 
+def test_login_page_does_not_expose_server_configuration():
+    login_source = LOGIN_PAGE.read_text(encoding="utf-8")
+
+    assert "setBaseUrl" not in login_source
+    assert "showCfg" not in login_source
+    assert "DEFAULT_SERVER_URL" not in login_source
+    assert "getBaseUrl" not in login_source
+
+
 def test_storage_and_api_client_wait_for_preferences_initialization():
     api_source = API_CLIENT.read_text(encoding="utf-8")
     storage_source = SECURE_STORAGE.read_text(encoding="utf-8")

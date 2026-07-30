@@ -116,7 +116,7 @@ def _persist_sensor_data(topic: str, payload):
 
 
 def _sync_device_status(topic: str, payload):
-    """Persist device state from `.../status` and `.../response` topics."""
+    """Persist device state from `.../status`, `.../response`, and `.../sensor` topics."""
     if isinstance(payload, str):
         try:
             payload = json.loads(payload)
@@ -124,7 +124,7 @@ def _sync_device_status(topic: str, payload):
             return
 
     parts = topic.split("/")
-    if len(parts) < 4 or parts[-1] not in {"status", "response"}:
+    if len(parts) < 4 or parts[-1] not in {"status", "response", "sensor"}:
         return
 
     room_id = parts[1]

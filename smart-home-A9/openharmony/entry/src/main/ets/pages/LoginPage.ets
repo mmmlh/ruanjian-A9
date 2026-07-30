@@ -1,5 +1,4 @@
-import { DEFAULT_SERVER_URL } from '../common/SecureStorage'
-import { getBaseUrl, getToken, initApiClient, login, setBaseUrl } from '../common/ApiClient'
+import { getToken, initApiClient, login } from '../common/ApiClient'
 import { ControlCenterTheme } from '../common/ControlCenterTheme'
 import { StatusBanner } from '../common/ControlCenterKit'
 import { UiText } from '../common/UiText'
@@ -19,12 +18,9 @@ struct LoginPage {
   @State pwd: string = ''
   @State loading: boolean = false
   @State err: string = ''
-  @State url: string = DEFAULT_SERVER_URL
-  @State showCfg: boolean = false
 
   aboutToAppear(): void {
     initApiClient().then(() => {
-      this.url = getBaseUrl() || DEFAULT_SERVER_URL
       if (getToken()) {
         this.getUIContext().getRouter().replaceUrl({ url: 'pages/DashboardPage' })
       }
@@ -133,44 +129,10 @@ struct LoginPage {
         .margin({ top: 12 })
         .onChange((value: string) => { this.pwd = value })
 
-      Row() {
-        Text(this.showCfg ? '收起服务器配置' : '展开服务器配置')
-          .fontSize(12)
-          .fontColor(ControlCenterTheme.textSecondary)
-      }
-      .margin({ top: 14 })
-      .onClick(() => { this.showCfg = !this.showCfg })
-
-      if (this.showCfg) {
-        Column() {
-          Text('服务器地址')
-            .fontSize(12)
-            .fontColor(ControlCenterTheme.textSecondary)
-            .width('100%')
-          TextInput({ placeholder: DEFAULT_SERVER_URL, text: this.url })
-            .type(InputType.Normal)
-            .height(46)
-            .width('100%')
-            .borderRadius(16)
-            .backgroundColor(ControlCenterTheme.loginFieldBg)
-            .fontSize(13)
-            .padding({ left: 14, right: 14 })
-            .margin({ top: 8 })
-            .onChange((value: string) => { this.url = value })
-          StatusBanner({
-            message: '部署地址仍然保持可配置',
-            detail: '不影响现有 API 初始化和存储逻辑',
-            tone: 'info'
-          }).margin({ top: 10 })
-        }
-        .width('100%')
-        .margin({ top: 12 })
-      }
-
       if (this.err) {
         StatusBanner({
           message: this.err,
-          detail: '请检查账号、密码或服务地址',
+          detail: '请检查账号、密码或网络连接',
           tone: 'danger'
         }).margin({ top: 14 })
       }
@@ -219,7 +181,6 @@ struct LoginPage {
     this.loading = true
     this.err = ''
     try {
-      setBaseUrl(this.url)
       await login(this.user, this.pwd)
       this.getUIContext().getRouter().replaceUrl({ url: 'pages/DashboardPage' })
     } catch (err) {

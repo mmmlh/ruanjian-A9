@@ -6,7 +6,6 @@ from fastapi import HTTPException
 from app.database.connection import get_db
 from app.services.entity_state import build_state, parse_entity_id
 from app.services.mqtt_client import publish_message
-from app.services.device_view import is_device_online
 from app.services.security import aes_decrypt
 
 
@@ -123,10 +122,6 @@ def execute_device_command(
         device = dict(row)
         if expected_device_type and device["type"] != expected_device_type:
             raise HTTPException(status_code=404, detail="entity_id_not_found")
-
-        last_seen_source = device.get("updated_at") or device.get("created_at")
-        if not is_device_online(last_seen_source):
-            raise HTTPException(status_code=409, detail="device_offline")
 
         actual_action, actual_params = decode_command_payload(action, params, user)
         payload = {"action": actual_action, **actual_params}

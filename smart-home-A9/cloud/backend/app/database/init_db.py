@@ -26,6 +26,30 @@ LEGACY_RULE_1_ACTION_JSON = json.dumps(
     [{"device_type": "light", "action": "on", "params": {"brightness": 80}}],
     separators=(",", ":"),
 )
+HOME_SCENE_DESCRIPTION = "到家一键启用：全屋灯光、空调、窗帘和加湿器开启，门锁保持上锁"
+HOME_SCENE_ACTIONS_JSON = json.dumps(
+    [
+        {"device_type": "light", "room_id": "livingroom", "action": "on", "params": {"brightness": 80}},
+        {"device_type": "light", "room_id": "bedroom", "action": "on", "params": {"brightness": 80}},
+        {"device_type": "light", "room_id": "study", "action": "on", "params": {"brightness": 80}},
+        {"device_type": "ac", "room_id": "livingroom", "action": "set", "params": {"power": "on", "mode": "cool", "temp": 26}},
+        {"device_type": "ac", "room_id": "bedroom", "action": "set", "params": {"power": "on", "mode": "cool", "temp": 26}},
+        {"device_type": "ac", "room_id": "study", "action": "set", "params": {"power": "on", "mode": "cool", "temp": 26}},
+        {"device_type": "curtain", "room_id": "livingroom", "action": "open", "params": {}},
+        {"device_type": "curtain", "room_id": "study", "action": "open", "params": {}},
+        {"device_type": "humidifier", "room_id": "bedroom", "action": "on", "params": {"level": 2, "target_humidity": 60}},
+        {"device_type": "door_lock", "room_id": "livingroom", "action": "lock", "params": {}},
+    ],
+    separators=(",", ":"),
+)
+LEGACY_HOME_SCENE_ACTIONS_JSON = json.dumps(
+    [
+        {"device_type": "light", "room_id": "livingroom", "action": "on", "params": {"brightness": 80}},
+        {"device_type": "ac", "room_id": "livingroom", "action": "set", "params": {"power": "on", "mode": "cool", "temp": 26}},
+        {"device_type": "door_lock", "room_id": "livingroom", "action": "unlock", "params": {"auth_code": "scene-trigger"}},
+    ],
+    separators=(",", ":"),
+)
 
 
 def repair_legacy_rule_payloads(conn: sqlite3.Connection):
@@ -45,6 +69,21 @@ def repair_legacy_rule_payloads(conn: sqlite3.Connection):
                 "UPDATE automation_rules SET condition_json = ? WHERE id = ?",
                 (LEGACY_RULE_1_CONDITION_JSON, row["id"]),
             )
+
+
+def repair_home_scene_payload(conn: sqlite3.Connection):
+    """Upgrade the untouched legacy home scene without changing user edits."""
+    conn.execute(
+        "UPDATE scenes SET description = ?, actions_json = ? "
+        "WHERE id = ? AND name = ? AND actions_json = ?",
+        (
+            HOME_SCENE_DESCRIPTION,
+            HOME_SCENE_ACTIONS_JSON,
+            1,
+            "回家模式",
+            LEGACY_HOME_SCENE_ACTIONS_JSON,
+        ),
+    )
 
 
 def ensure_schema(conn: sqlite3.Connection):
@@ -156,6 +195,7 @@ def seed_data(conn: sqlite3.Connection):
     count = conn.execute("SELECT COUNT(*) FROM rooms").fetchone()[0]
     if count > 0:
         repair_legacy_rule_payloads(conn)
+        repair_home_scene_payload(conn)
         return
 
     # ── 默认用户 admin/admin123 ──
@@ -258,11 +298,8 @@ def seed_data(conn: sqlite3.Connection):
 
     # ── 场景 ──
     conn.execute(
-        "INSERT INTO scenes (id, name, icon, description, actions_json) VALUES "
-        "(1, '回家模式', '🏠', '到家一键开启：客厅灯亮 + 空调制冷 + 门禁解锁', "
-        "'[{\"device_type\":\"light\",\"room_id\":\"livingroom\",\"action\":\"on\",\"params\":{\"brightness\":80}},"
-        "{\"device_type\":\"ac\",\"room_id\":\"livingroom\",\"action\":\"set\",\"params\":{\"power\":\"on\",\"mode\":\"cool\",\"temp\":26}},"
-        "{\"device_type\":\"door_lock\",\"room_id\":\"livingroom\",\"action\":\"unlock\",\"params\":{\"auth_code\":\"scene-trigger\"}}]')"
+        "INSERT INTO scenes (id, name, icon, description, actions_json) VALUES (?, ?, ?, ?, ?)",
+        (1, "回家模式", "🏠", HOME_SCENE_DESCRIPTION, HOME_SCENE_ACTIONS_JSON),
     )
     conn.execute(
         "INSERT INTO scenes (id, name, icon, description, actions_json) VALUES "

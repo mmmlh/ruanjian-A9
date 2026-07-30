@@ -1,13 +1,39 @@
 """
 场景管理 API 测试
 """
+import json
+
 import pytest
+
+from app.database import init_db
 
 
 SCENE_ACTIONS = (
     '[{"device_type":"light","room_id":"livingroom","action":"on","params":{"brightness":80}},'
     '{"device_type":"ac","room_id":"livingroom","action":"set","params":{"power":"on","mode":"cool","temp":26}}]'
 )
+
+HOME_SCENE_ACTIONS = [
+    {"device_type": "light", "room_id": "livingroom", "action": "on", "params": {"brightness": 80}},
+    {"device_type": "light", "room_id": "bedroom", "action": "on", "params": {"brightness": 80}},
+    {"device_type": "light", "room_id": "study", "action": "on", "params": {"brightness": 80}},
+    {"device_type": "ac", "room_id": "livingroom", "action": "set", "params": {"power": "on", "mode": "cool", "temp": 26}},
+    {"device_type": "ac", "room_id": "bedroom", "action": "set", "params": {"power": "on", "mode": "cool", "temp": 26}},
+    {"device_type": "ac", "room_id": "study", "action": "set", "params": {"power": "on", "mode": "cool", "temp": 26}},
+    {"device_type": "curtain", "room_id": "livingroom", "action": "open", "params": {}},
+    {"device_type": "curtain", "room_id": "study", "action": "open", "params": {}},
+    {"device_type": "humidifier", "room_id": "bedroom", "action": "on", "params": {"level": 2, "target_humidity": 60}},
+    {"device_type": "door_lock", "room_id": "livingroom", "action": "lock", "params": {}},
+]
+
+LEGACY_HOME_SCENE_ACTIONS = [
+    {"device_type": "light", "room_id": "livingroom", "action": "on", "params": {"brightness": 80}},
+    {"device_type": "ac", "room_id": "livingroom", "action": "set", "params": {"power": "on", "mode": "cool", "temp": 26}},
+    {"device_type": "door_lock", "room_id": "livingroom", "action": "unlock", "params": {"auth_code": "scene-trigger"}},
+]
+
+HOME_SCENE_DESCRIPTION = "到家一键启用：全屋灯光、空调、窗帘和加湿器开启，门锁保持上锁"
+LEGACY_HOME_SCENE_DESCRIPTION = "到家一键开启：客厅灯亮 + 空调制冷 + 门禁解锁"
 
 
 class TestScenes:
@@ -33,6 +59,32 @@ class TestScenes:
         assert data["name"] == "回家模式"
         assert data["icon"] == "🏠"
         assert "actions_json" in data
+
+    def test_home_scene_enables_all_controllable_devices(self, client, auth_headers):
+        response = client.get("/api/scenes/1", headers=auth_headers)
+
+        assert response.status_code == 200
+        scene = response.json()
+        assert scene["description"] == HOME_SCENE_DESCRIPTION
+        assert json.loads(scene["actions_json"]) == HOME_SCENE_ACTIONS
+
+    def test_init_db_repairs_legacy_home_scene(self, db):
+        db.execute(
+            "UPDATE scenes SET description = ?, actions_json = ? WHERE id = 1",
+            (
+                LEGACY_HOME_SCENE_DESCRIPTION,
+                json.dumps(LEGACY_HOME_SCENE_ACTIONS, separators=(",", ":")),
+            ),
+        )
+        db.commit()
+
+        init_db()
+
+        repaired = db.execute(
+            "SELECT description, actions_json FROM scenes WHERE id = 1"
+        ).fetchone()
+        assert repaired["description"] == HOME_SCENE_DESCRIPTION
+        assert json.loads(repaired["actions_json"]) == HOME_SCENE_ACTIONS
 
     def test_get_scene_not_found(self, client, auth_headers):
         r = client.get("/api/scenes/999", headers=auth_headers)

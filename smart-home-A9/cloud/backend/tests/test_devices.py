@@ -260,7 +260,7 @@ class TestDevices:
         assert after_status == before_status
         assert after_logs == before_logs
 
-    def test_service_call_rejects_offline_device_with_structured_error(self, client, auth_headers, db):
+    def test_service_call_accepts_offline_device(self, client, auth_headers, db):
         db.execute("UPDATE devices SET updated_at = ? WHERE id = 4", ("2000-01-01 00:00:00",))
         db.commit()
 
@@ -270,15 +270,16 @@ class TestDevices:
             headers=auth_headers,
         )
 
-        assert response.status_code == 409
+        assert response.status_code == 200
         payload = response.json()
-        assert payload["success"] is False
-        assert payload["detail"] == "device_offline"
-        assert payload["message"] == "device_offline"
+        assert payload["success"] is True
         assert payload["entity_id"] == "light.device_4"
         assert payload["action"] == "on"
-        assert payload["changed_states"] == []
-        assert payload["service_response"] == {}
+        assert len(payload["changed_states"]) == 1
+        assert payload["service_response"]["light.device_4"]["payload"] == {
+            "action": "on",
+            "brightness": 75,
+        }
         assert isinstance(payload["executed_at"], str)
         assert payload["executed_at"].strip()
 
@@ -303,6 +304,19 @@ class TestDevices:
         assert '"power": "on"' in after
         assert '"brightness": 91' in after
         assert '"device_id": "light_004"' not in after
+
+    def test_mqtt_sensor_updates_sensor_device_state_and_freshness(self, client, db):
+        db.execute("UPDATE devices SET updated_at = ? WHERE id = 1", ("2000-01-01 00:00:00",))
+        db.commit()
+
+        on_mqtt_message(
+            "home/livingroom/temperature_sensor/sensor",
+            {"value": 26.4, "unit": "celsius", "device_id": "temp_001", "ts": 1},
+        )
+
+        row = db.execute("SELECT status_json, updated_at FROM devices WHERE id = 1").fetchone()
+        assert json.loads(row["status_json"]) == {"value": 26.4, "unit": "celsius", "ts": 1}
+        assert row["updated_at"] != "2000-01-01 00:00:00"
 
     def test_state_read_tolerates_bad_numeric_status_values(self, client, auth_headers, db):
         db.execute("UPDATE devices SET status_json = ? WHERE id = 15", ('{"position":"bad"}',))
