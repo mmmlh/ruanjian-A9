@@ -24,6 +24,7 @@ struct RulesPage {
   @State nm: string = ''
   @State tr: string = ''
   @State fl: string = 'value'
+  @State triggerRoom: string = ''
   @State op: string = 'gt'
   @State vl: string = '28'
   @State targetId: number = 0
@@ -35,12 +36,13 @@ struct RulesPage {
   @State brightnessValue: number = 80
   @State targetHumidityValue: number = 60
   @State levelValue: number = 2
-  @State optionsLoaded: boolean = false
   @State ruleOptions: RuleOptions = new RuleOptions()
   @State errorMessage: string = ''
   @State ruleTab: number = 0
   @State deleteTargetId: number = -1
   @State deleteTargetName: string = ''
+  @State ruleOperationId: number = -1
+  @State creating: boolean = false
 
   aboutToAppear(): void {
     this.ld()
@@ -50,10 +52,10 @@ struct RulesPage {
     this.loading = true
     this.errorMessage = ''
     try {
-      if (!this.optionsLoaded) {
-        await this.loadOptions()
-      }
-      this.rules = await getRules()
+      let optionsPromise = this.loadOptions()
+      let rulesPromise = getRules()
+      await optionsPromise
+      this.rules = await rulesPromise
     } catch (err) {
       this.errorMessage = localizeMessage((err as Error).message, '加载自动化规则失败')
     } finally {
@@ -63,16 +65,16 @@ struct RulesPage {
 
   async loadOptions(): Promise<void> {
     this.ruleOptions = await getRuleOptions()
-    this.optionsLoaded = true
     if (this.ruleOptions.triggers.length > 0) {
       this.tr = this.ruleOptions.triggers[0].value
       this.fl = this.ruleOptions.triggers[0].field
+      this.triggerRoom = this.ruleOptions.triggers[0].room_name
     }
     if (this.ruleOptions.targets.length > 0) {
       let first = this.ruleOptions.targets[0]
       this.targetId = first.device_id
       this.targetType = first.type
-      this.targetRoom = first.room_name ? first.room_name.toLowerCase().replace(/\s+/g, '') : 'same'
+      this.targetRoom = first.room_id || 'same'
       if (first.actions.length > 0) {
         this.an = first.actions[0]
       }
@@ -80,20 +82,32 @@ struct RulesPage {
   }
 
   async dT(id: number): Promise<void> {
+    if (this.ruleOperationId > 0) {
+      return
+    }
+    this.ruleOperationId = id
     try {
       await toggleRule(id)
       this.rules = await getRules()
     } catch (err) {
       this.errorMessage = localizeMessage((err as Error).message, '切换规则状态失败')
+    } finally {
+      this.ruleOperationId = -1
     }
   }
 
   async dD(id: number): Promise<void> {
+    if (this.ruleOperationId > 0) {
+      return
+    }
+    this.ruleOperationId = id
     try {
       await deleteRule(id)
       this.rules = await getRules()
     } catch (err) {
       this.errorMessage = localizeMessage((err as Error).message, '删除规则失败')
+    } finally {
+      this.ruleOperationId = -1
     }
   }
 
@@ -158,6 +172,9 @@ struct RulesPage {
   }
 
   async dC(): Promise<void> {
+    if (this.creating) {
+      return
+    }
     this.errorMessage = ''
     if (!this.nm.trim()) {
       this.errorMessage = '规则名称不能为空'
@@ -181,7 +198,16 @@ struct RulesPage {
         this.errorMessage = '阈值必须是数字'
         return
       }
+      if (this.tr === 'humidity_sensor' && (threshold < 0 || threshold > 100)) {
+        this.errorMessage = '湿度阈值必须在 0% 到 100% 之间'
+        return
+      }
+      if (this.tr === 'temperature_sensor' && (threshold < -50 || threshold > 100)) {
+        this.errorMessage = '温度阈值必须在 -50°C 到 100°C 之间'
+        return
+      }
     }
+    this.creating = true
     try {
       await createRule(this.nm.trim(), this.buildConditionJson(), this.buildActionJson())
       this.resetDialog()
@@ -189,6 +215,8 @@ struct RulesPage {
       this.rules = await getRules()
     } catch (err) {
       this.errorMessage = localizeMessage((err as Error).message, '创建规则失败')
+    } finally {
+      this.creating = false
     }
   }
 
@@ -323,15 +351,16 @@ struct RulesPage {
   pickTarget(target: RuleTargetOption): void {
     this.targetId = target.device_id
     this.targetType = target.type
-    this.targetRoom = target.room_name ? target.room_name.toLowerCase().replace(/\s+/g, '') : 'same'
+    this.targetRoom = target.room_id || 'same'
     if (target.actions.length > 0) {
       this.an = target.actions[0]
     }
   }
 
-  pickTrigger(value: string, field: string): void {
+  pickTrigger(value: string, field: string, roomName: string): void {
     this.tr = value
     this.fl = field
+    this.triggerRoom = roomName
     if (value === 'pir_sensor') {
       if (this.op !== 'eq' && this.op !== 'neq') {
         this.op = 'eq'
@@ -349,7 +378,7 @@ struct RulesPage {
   selectedTrigger(): RuleTriggerOption | null {
     for (let i = 0; i < this.ruleOptions.triggers.length; i++) {
       let trigger = this.ruleOptions.triggers[i]
-      if (trigger.value === this.tr && trigger.field === this.fl) {
+      if (trigger.value === this.tr && trigger.field === this.fl && trigger.room_name === this.triggerRoom) {
         return trigger
       }
     }
@@ -632,6 +661,7 @@ struct RulesPage {
                 Toggle({ type: ToggleType.Switch, isOn: rule.enabled === 1 })
                   .selectedColor(ControlCenterTheme.accent)
                   .accessibilityText(rule.enabled === 1 ? '停用' + rule.name : '启用' + rule.name)
+                  .enabled(this.ruleOperationId < 0)
                   .onChange((isOn: boolean) => { this.dT(rule.id) })
                 Blank()
                 Button() {
@@ -643,6 +673,7 @@ struct RulesPage {
                   .height(ControlCenterTheme.tapTarget)
                   .borderRadius(ControlCenterTheme.radiusInner)
                   .backgroundColor(ControlCenterTheme.dangerSoft)
+                  .enabled(this.ruleOperationId < 0)
                   .accessibilityText('删除' + rule.name)
                   .onClick(() => this.requestDelete(rule))
               }
@@ -757,7 +788,7 @@ struct RulesPage {
 
   isChoiceSelected(group: number, value: string): boolean {
     if (group === 0) {
-      return this.tr + '|' + this.fl === value
+      return this.tr + '|' + this.fl + '|' + this.triggerRoom === value
     }
     if (group === 1) {
       return this.op === value
@@ -873,7 +904,7 @@ struct RulesPage {
             SectionTitle({ title: '1. 选择触发器', subtitle: '选择哪个房间、哪类传感器负责触发' })
             Flex({ wrap: FlexWrap.Wrap }) {
               ForEach(this.ruleOptions.triggers, (trigger: RuleTriggerOption) => {
-                this.buildChoiceChip(this.triggerLabel(trigger.value) + ' · ' + trigger.room_name, 0, trigger.value + '|' + trigger.field, () => this.pickTrigger(trigger.value, trigger.field))
+                this.buildChoiceChip(this.triggerLabel(trigger.value) + ' · ' + trigger.room_name, 0, trigger.value + '|' + trigger.field + '|' + trigger.room_name, () => this.pickTrigger(trigger.value, trigger.field, trigger.room_name))
               }, (trigger: RuleTriggerOption) => trigger.value + '-' + trigger.room_name + '-' + trigger.field)
             }
             .width('100%')
@@ -979,7 +1010,7 @@ struct RulesPage {
               .borderRadius(16)
               .onClick(() => { this.dlg = false })
             Blank().width(10)
-            Button('创建规则')
+            Button(this.creating ? '创建中...' : '创建规则')
               .type(ButtonType.Capsule)
               .layoutWeight(1)
               .height(46)
@@ -988,6 +1019,7 @@ struct RulesPage {
               .backgroundColor(ControlCenterTheme.accent)
               .fontColor('#FFFFFF')
               .borderRadius(16)
+              .enabled(!this.creating)
               .onClick(() => this.dC())
           }
           .width('100%')
@@ -1042,6 +1074,7 @@ struct RulesPage {
             .fontColor('#FFFFFF')
             .backgroundColor(ControlCenterTheme.danger)
             .borderRadius(ControlCenterTheme.radiusInner)
+            .enabled(this.ruleOperationId < 0)
             .onClick(() => this.confirmDelete())
         }
         .width('100%')

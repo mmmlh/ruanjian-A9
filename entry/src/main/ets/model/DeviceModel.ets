@@ -53,6 +53,7 @@ export class DeviceStatus {
   locked: boolean = false
   presence: boolean = false
   value: number = 0
+  valueKnown: boolean = false
   unit: string = ''
   position: number = 0
   level: number = 0
@@ -173,6 +174,7 @@ export class RuleTargetOption {
   device_id: number = 0
   label: string = ''
   type: string = ''
+  room_id: string = ''
   room_name: string = ''
   actions: string[] = []
 }
@@ -241,6 +243,7 @@ export function parseDeviceStatus(json: string): DeviceStatus {
     let valueVal = obj['value']
     if (valueVal !== undefined && valueVal !== null) {
       status.value = valueVal as number
+      status.valueKnown = true
     }
     let unitVal = obj['unit']
     if (unitVal !== undefined && unitVal !== null) {

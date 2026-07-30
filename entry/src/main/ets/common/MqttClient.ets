@@ -2,90 +2,153 @@ import { BusinessError } from '@ohos.base'
 import webSocket from '@ohos.net.webSocket'
 import { getBaseUrl, getToken } from './ApiClient'
 
+const RECONNECT_DELAYS: number[] = [2000, 5000, 10000, 20000, 30000]
+
 let ws: webSocket.WebSocket | null = null
 let messageCallback: ((msg: string) => void) | null = null
 let statusCallback: ((connected: boolean) => void) | null = null
 let reconnectTimer: number = -1
+let reconnectAttempt: number = 0
 let isConnecting: boolean = false
+let manualClose: boolean = true
+let connectionGeneration: number = 0
 
 export function connectWS(onMessage: (msg: string) => void, onStatus?: (connected: boolean) => void): void {
+  disconnectWS()
   messageCallback = onMessage
   statusCallback = onStatus || null
-  _doConnect()
+  reconnectAttempt = 0
+  manualClose = false
+  doConnect()
 }
 
-function _doConnect(): void {
-  if (isConnecting) return
-  isConnecting = true
+function doConnect(): void {
+  if (manualClose || isConnecting || ws !== null) {
+    return
+  }
 
   let token = getToken()
+  if (!token) {
+    if (statusCallback) {
+      statusCallback(false)
+    }
+    return
+  }
+
+  isConnecting = true
+  let generation = ++connectionGeneration
   let base = getBaseUrl()
   let wsProtocol = base.startsWith('https') ? 'wss://' : 'ws://'
   let host = base.replace('https://', '').replace('http://', '')
   let url = `${wsProtocol}${host}/ws/realtime?token=${token}`
+  let socket = webSocket.createWebSocket()
+  ws = socket
 
-  ws = webSocket.createWebSocket()
-  ws!.on('open', () => {
+  socket.on('open', () => {
+    if (manualClose || generation !== connectionGeneration) {
+      closeSocket(socket)
+      return
+    }
     console.info('WebSocket connected')
     isConnecting = false
-    if (reconnectTimer > 0) {
-      clearInterval(reconnectTimer)
-      reconnectTimer = -1
-    }
+    reconnectAttempt = 0
+    clearReconnectTimer()
     if (statusCallback) {
       statusCallback(true)
     }
   })
 
-  ws!.on('message', (err: BusinessError, data: string | ArrayBuffer) => {
-    if (typeof data === 'string') {
-      if (messageCallback) {
-        messageCallback(data)
-      }
+  socket.on('message', (err: BusinessError, data: string | ArrayBuffer) => {
+    if (manualClose || generation !== connectionGeneration || err.code) {
+      return
+    }
+    if (typeof data === 'string' && messageCallback) {
+      messageCallback(data)
     }
   })
 
-  ws!.on('close', () => {
+  socket.on('close', () => {
+    if (generation !== connectionGeneration) {
+      return
+    }
     console.info('WebSocket closed')
+    if (ws === socket) {
+      ws = null
+    }
     isConnecting = false
     if (statusCallback) {
       statusCallback(false)
     }
-    _scheduleReconnect()
+    scheduleReconnect()
   })
 
-  ws!.on('error', (err: BusinessError) => {
+  socket.on('error', (err: BusinessError) => {
+    if (generation !== connectionGeneration) {
+      return
+    }
     console.error('WebSocket error', err)
+    if (ws === socket) {
+      ws = null
+    }
     isConnecting = false
+    if (statusCallback) {
+      statusCallback(false)
+    }
+    closeSocket(socket)
+    scheduleReconnect()
   })
 
-  ws!.connect(url).catch((err: Error) => {
+  socket.connect(url).catch((err: Error) => {
+    if (generation !== connectionGeneration) {
+      return
+    }
     console.error('WebSocket connect failed', err)
+    if (ws === socket) {
+      ws = null
+    }
     isConnecting = false
-    _scheduleReconnect()
+    scheduleReconnect()
   })
 }
 
-function _scheduleReconnect(): void {
-  if (reconnectTimer > 0) return
-  reconnectTimer = setInterval(() => {
-    console.info('WebSocket reconnecting...')
-    _doConnect()
-  }, 5000)
+function scheduleReconnect(): void {
+  if (manualClose || reconnectTimer > 0) {
+    return
+  }
+  let index = reconnectAttempt < RECONNECT_DELAYS.length ? reconnectAttempt : RECONNECT_DELAYS.length - 1
+  let delay = RECONNECT_DELAYS[index]
+  reconnectAttempt++
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = -1
+    doConnect()
+  }, delay)
+}
+
+function clearReconnectTimer(): void {
+  if (reconnectTimer > 0) {
+    clearTimeout(reconnectTimer)
+    reconnectTimer = -1
+  }
+}
+
+function closeSocket(socket: webSocket.WebSocket): void {
+  try {
+    socket.close()
+  } catch (err) {
+    console.error('WebSocket close error', err)
+  }
 }
 
 export function disconnectWS(): void {
-  if (reconnectTimer > 0) {
-    clearInterval(reconnectTimer)
-    reconnectTimer = -1
-  }
-  if (ws) {
-    try {
-      ws.close()
-    } catch (e) {
-      console.error('WebSocket close error', e)
-    }
-    ws = null
+  manualClose = true
+  connectionGeneration++
+  clearReconnectTimer()
+  isConnecting = false
+  let activeSocket = ws
+  ws = null
+  if (activeSocket) {
+    closeSocket(activeSocket)
   }
   messageCallback = null
+  statusCallback = null
 }

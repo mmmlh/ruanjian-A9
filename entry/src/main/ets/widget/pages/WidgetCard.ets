@@ -4,10 +4,15 @@ struct WidgetCard {
   @LocalStorageProp('temperature') temperature: string = '--'
   @LocalStorageProp('humidity') humidity: string = '--'
   @LocalStorageProp('lightOn') lightOn: boolean = false
+  @LocalStorageProp('lightKnown') lightKnown: boolean = false
   @LocalStorageProp('acOn') acOn: boolean = false
+  @LocalStorageProp('acKnown') acKnown: boolean = false
   @LocalStorageProp('locked') locked: boolean = true
+  @LocalStorageProp('lockKnown') lockKnown: boolean = false
   @LocalStorageProp('curtainOpen') curtainOpen: boolean = false
+  @LocalStorageProp('curtainKnown') curtainKnown: boolean = false
   @LocalStorageProp('humidifierOn') humidifierOn: boolean = false
+  @LocalStorageProp('humidifierKnown') humidifierKnown: boolean = false
   @LocalStorageProp('updateTime') updateTime: string = '--:--'
 
   build() {
@@ -39,7 +44,7 @@ struct WidgetCard {
         Column() {
           Text('\uD83C\uDF21\uFE0F')
             .fontSize(18)
-          Text(`${this.temperature}\u00B0C`)
+          Text(this.temperature === '--' ? '未知' : `${this.temperature}\u00B0C`)
             .fontSize(12)
             .fontWeight(FontWeight.Bold)
             .fontColor('#E07918')
@@ -53,7 +58,7 @@ struct WidgetCard {
         Column() {
           Text('\uD83D\uDCA7')
             .fontSize(18)
-          Text(`${this.humidity}%`)
+          Text(this.humidity === '--' ? '未知' : `${this.humidity}%`)
             .fontSize(12)
             .fontWeight(FontWeight.Bold)
             .fontColor('#2878C8')
@@ -65,9 +70,9 @@ struct WidgetCard {
         .alignItems(HorizontalAlign.Center)
 
         Column() {
-          Text(this.lightOn ? '\uD83D\uDCA1' : '\uD83D\uDD0C')
+          Text(!this.lightKnown ? '\u2754' : (this.lightOn ? '\uD83D\uDCA1' : '\uD83D\uDD0C'))
             .fontSize(18)
-          Text(this.lightOn ? '开启' : '关闭')
+          Text(!this.lightKnown ? '未知' : (this.lightOn ? '开启' : '关闭'))
             .fontSize(12)
             .fontWeight(FontWeight.Bold)
             .fontColor(this.lightOn ? '#E07918' : '#777777')
@@ -79,9 +84,9 @@ struct WidgetCard {
         .alignItems(HorizontalAlign.Center)
 
         Column() {
-          Text(this.locked ? '\uD83D\uDD12' : '\uD83D\uDD13')
+          Text(!this.lockKnown ? '\u2754' : (this.locked ? '\uD83D\uDD12' : '\uD83D\uDD13'))
             .fontSize(18)
-          Text(this.locked ? '锁定' : '解锁')
+          Text(!this.lockKnown ? '未知' : (this.locked ? '锁定' : '解锁'))
             .fontSize(12)
             .fontWeight(FontWeight.Bold)
             .fontColor(this.locked ? '#16A064' : '#E07918')
@@ -96,9 +101,9 @@ struct WidgetCard {
 
       Row() {
         Column() {
-          Text(this.acOn ? '\u2744\uFE0F' : '\uD83D\uDD0C')
+          Text(!this.acKnown ? '\u2754' : (this.acOn ? '\u2744\uFE0F' : '\uD83D\uDD0C'))
             .fontSize(18)
-          Text(this.acOn ? '运行' : '关闭')
+          Text(!this.acKnown ? '未知' : (this.acOn ? '运行' : '关闭'))
             .fontSize(12)
             .fontWeight(FontWeight.Bold)
             .fontColor(this.acOn ? '#2878C8' : '#777777')
@@ -110,9 +115,9 @@ struct WidgetCard {
         .alignItems(HorizontalAlign.Center)
 
         Column() {
-          Text(this.curtainOpen ? '\u2600\uFE0F' : '\uD83E\uDE9B')
+          Text(!this.curtainKnown ? '\u2754' : (this.curtainOpen ? '\u2600\uFE0F' : '\uD83E\uDE9B'))
             .fontSize(18)
-          Text(this.curtainOpen ? '开启' : '关闭')
+          Text(!this.curtainKnown ? '未知' : (this.curtainOpen ? '开启' : '关闭'))
             .fontSize(12)
             .fontWeight(FontWeight.Bold)
             .fontColor('#777777')
@@ -124,9 +129,9 @@ struct WidgetCard {
         .alignItems(HorizontalAlign.Center)
 
         Column() {
-          Text(this.humidifierOn ? '\u2728' : '\uD83D\uDD0C')
+          Text(!this.humidifierKnown ? '\u2754' : (this.humidifierOn ? '\u2728' : '\uD83D\uDD0C'))
             .fontSize(18)
-          Text(this.humidifierOn ? '运行' : '关闭')
+          Text(!this.humidifierKnown ? '未知' : (this.humidifierOn ? '运行' : '关闭'))
             .fontSize(12)
             .fontWeight(FontWeight.Bold)
             .fontColor(this.humidifierOn ? '#2878C8' : '#777777')

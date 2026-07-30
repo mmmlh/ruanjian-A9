@@ -4,6 +4,8 @@ import Want from '@ohos.app.ability.Want'
 import hilog from '@ohos.hilog'
 import window from '@ohos.window'
 import { initPreferences } from '../common/SecureStorage'
+import { setSessionExpiredHandler } from '../common/ApiClient'
+import { disconnectWS } from '../common/MqttClient'
 
 export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
@@ -13,6 +15,8 @@ export default class EntryAbility extends UIAbility {
 
   onDestroy(): void {
     hilog.info(0x0000, 'SmartHome', 'Ability onDestroy')
+    setSessionExpiredHandler(null)
+    disconnectWS()
   }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {
@@ -23,6 +27,10 @@ export default class EntryAbility extends UIAbility {
         return
       }
       hilog.info(0x0000, 'SmartHome', 'Succeeded in loading content')
+      setSessionExpiredHandler(() => {
+        disconnectWS()
+        windowStage.getMainWindowSync().getUIContext().getRouter().replaceUrl({ url: 'pages/LoginPage' })
+      })
     })
   }
 

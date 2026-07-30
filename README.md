@@ -115,7 +115,7 @@ _OpenHarmony API 20 单模块智能家居客户端的架构、接口、构建、
 | 构建系统 | Hvigor 6.22.3 | `modelVersion: 6.0.2` |
 | SDK | OpenHarmony API 20 | 编译、目标和最低兼容 API 均为 20 |
 | HTTP | `@ohos.net.http` | JSON REST 请求，10 秒连接和读取超时 |
-| 实时通道 | `@ohos.net.webSocket` | `/ws/realtime?token=...`，5 秒重连 |
+| 实时通道 | `@ohos.net.webSocket` | `/ws/realtime?token=...`，2～30 秒退避重连 |
 | 加密 | `@ohos.security.cryptoFramework` | AES-256-CBC + PKCS7；用于控制指令封装 |
 | 持久化 | `@ohos.data.preferences` | 保存认证数据与服务器 URL |
 | 日志 | `@ohos.hilog`、`console` | Ability、卡片和网络层分散记录 |
@@ -198,7 +198,7 @@ flowchart TB
 1. **页面直接调用 API 层。** 项目没有 Repository、Service 或状态容器层，页面同时负责业务编排和展示。
 2. **后端是系统核心。** 客户端不直连 MQTT Broker；`MqttClient` 名称容易误导，它实际连接的是后端 WebSocket 网关。
 3. **REST 是权威状态源。** WebSocket 只在首页增量更新内存状态；设备控制完成后仍会重新请求 REST 数据。
-4. **桌面卡片独立取数。** 卡片不复用 `ApiClient.request`，而是直接匿名请求 `/api/devices`。
+4. **桌面卡片独立取数。** 卡片不复用 `ApiClient.request`，但会从 Preferences 读取 Token，并携带 Bearer 认证请求 `/api/devices`。
 
 ---
 
@@ -246,8 +246,8 @@ openharmony/
 | `entry/src/main/ets/pages/DeviceRemotePage.ets` | 五类设备控制面板 | 约 1017 行，按 `deviceType` 分支 |
 | `entry/src/main/ets/pages/RulesPage.ets` | 规则 CRUD 和动态规则表单 | JSON 条件/动作结构依赖后端契约 |
 | `entry/src/main/ets/pages/DataMonitorPage.ets` | 实时、历史和日志三个视图 | 历史数据仅列表展示，无图表 |
-| `entry/src/main/ets/common/MqttClient.ets` | 实时 WebSocket | 单例连接、单组回调、5 秒重连 |
-| `entry/src/main/ets/entryformability/EntryFormAbility.ets` | 卡片取数与刷新 | 未复用认证请求逻辑 |
+| `entry/src/main/ets/common/MqttClient.ets` | 实时 WebSocket | 单例连接、单组回调、2～30 秒退避重连 |
+| `entry/src/main/ets/entryformability/EntryFormAbility.ets` | 卡片取数与刷新 | 独立请求，复用认证与服务器配置 |
 
 ---
 
@@ -355,7 +355,7 @@ sequenceDiagram
 
 ### 首页加载与实时更新
 
-1. `DashboardPage.aboutToAppear()` 并行触发 REST 加载和 WebSocket 连接。
+1. `DashboardPage.aboutToAppear()` 先完成 REST 首次加载，再建立 WebSocket 连接。
 2. `GET /api/dashboard/summary` 返回房间、设备、场景、日志和统计。
 3. WebSocket 连接 `/ws/realtime?token=<jwt>`。
 4. 首页只处理 `type === "mqtt"` 的消息。
@@ -393,7 +393,7 @@ sequenceDiagram
     API-->>P: 最新设备状态
 ```
 
-当 JWT 中不含 `aes_key` 时，`callService` 会发送明文 `action` 和 `params`。有 AES Key 时，请求体会改写为：
+`callService` 只发送加密指令。JWT 不含有效 `aes_key`、密钥长度异常或加密失败时，请求会在客户端被阻止；加密成功后的请求体为：
 
 ```json
 {
@@ -691,8 +691,8 @@ WebSocket 消息：
 | 网络权限 | `entry/src/main/module.json5` | `ohos.permission.INTERNET` |
 | 默认服务器 | `SecureStorage.ets` | `http://8.162.10.179:8000` |
 | 本地偏好文件 | `SecureStorage.ets` | `smart_home_auth` |
-| WebSocket 重连 | `MqttClient.ets` | 每 5 秒 |
-| 卡片刷新 | `form_config.json` / Form Ability | 系统计划 + 应用内每 60 秒 |
+| WebSocket 重连 | `MqttClient.ets` | 2、5、10、20、30 秒有界退避 |
+| 卡片刷新 | `form_config.json` / Form Ability | 系统计划、可见性通知和手动刷新 |
 
 `setBaseUrl()` 可以保存服务器地址，但当前页面没有调用它。因此源码中的默认地址实际上是普通用户唯一可用的服务器地址；`screenshots/` 中出现的“服务器配置”入口属于历史界面，当前页面代码中不存在。
 
@@ -704,20 +704,17 @@ WebSocket 消息：
 
 | 等级 | 问题 | 影响 | 建议 |
 | --- | --- | --- | --- |
-| 严重 | `build-profile.json5` 含本机签名文件路径和明文口令 | 凭据泄露，可移植性差 | 立即轮换现有材料；移出仓库，使用 DevEco/CI 密钥管理和本地忽略文件 |
 | 高 | 全局允许明文 HTTP，默认服务器也是 HTTP | Token、设备状态和控制指令可被窃听或篡改 | 后端启用 HTTPS/WSS；生产构建禁止 cleartext |
 | 高 | JWT 通过 WebSocket 查询参数传输 | URL 可能进入代理、网关或诊断日志 | 使用受支持的认证头、一次性票据或首帧认证 |
 | 高 | Token 与 AES Key 存入普通 Preferences | 设备侧认证材料保护不足 | 使用 OpenHarmony HUKS/安全存储，避免重复保存派生密钥 |
 | 高 | AES-CBC 不提供完整性认证 | 密文可能被篡改而无法检测 | 改用 AES-GCM，并使用独立密钥版本和重放保护 |
-| 高 | 随机数失败时退化为全零 IV；门锁验证码可退化为明文/演示值 | 安全失败被静默降级 | 安全操作必须失败关闭，禁止任何明文或固定值回退 |
 | 中 | 客户端直接信任 JWT 负载中的 `aes_key`，不验证签名 | 本地逻辑可使用伪造负载 | 密钥协商和授权应由可信后端/系统密钥设施完成 |
-| 中 | 桌面卡片匿名请求 `/api/devices` | 若端点要求认证则卡片永远回退默认值；若不要求则可能泄露状态 | 为 Form 安全读取凭据并复用 API 层，或提供最小权限卡片接口 |
 
 ### 其他配置风险
 
-- `local.properties` 包含本机 SDK 路径，文件头也明确说明不应纳入版本控制。
-- 当前仓库没有 `.gitignore`，但已经包含 `entry/build`、`.hvigor`、`.idea`、本地属性和大体积日志。
-- `clearAuthData()` 调用 `prefs.clear()`，退出登录会连同已保存服务器 URL 一并删除。
+- `local.properties` 包含本机 SDK 路径，文件头也明确说明不应纳入版本控制；当前由 `.gitignore` 排除。
+- `.gitignore` 已排除 `entry/build`、`.hvigor`、`.idea`、本地属性和日志等机器本地文件。
+- 退出登录只删除 Token 和 AES Key，保留已保存的服务器 URL。
 - 服务器地址的 `setBaseUrl()` 异步保存未被等待，应用立即退出时可能丢失更新。
 
 ---
@@ -726,7 +723,7 @@ WebSocket 消息：
 
 ### 声明
 
-卡片名为 `widget`，默认尺寸 `2*2`，还支持 `2*4`。它支持系统更新、每日 `10:30` 计划更新、应用内 60 秒循环更新、显隐通知和手动刷新消息。
+卡片名为 `widget`，默认尺寸 `2*2`，还支持 `2*4`。它支持系统更新、每日 `10:30` 计划更新、显隐通知和手动刷新消息，不再自行启动 60 秒轮询。
 
 ### 数据映射
 
@@ -889,7 +886,7 @@ Unable to find 'sdk.dir' in 'local.properties' or 'OHOS_BASE_SDK_HOME'
 
 - 检查返回 JSON 是否包含非空 `token`。
 - 检查 Preferences 是否已成功初始化。
-- 检查后端 Token 是否满足三段式 JWT 格式；否则无法提取 AES Key，但基础登录仍可能成功。
+- 检查后端 Token 是否满足三段式 JWT 格式并包含有效的 32 字节 `aes_key`；缺少密钥时可以登录，但设备控制会被客户端阻止。
 - 检查 `/api/dashboard/summary` 是否接受该 Token。
 
 ### 首页无实时数据
@@ -910,7 +907,7 @@ Unable to find 'sdk.dir' in 'local.properties' or 'OHOS_BASE_SDK_HOME'
 
 ### 桌面卡片一直显示默认值
 
-- 卡片当前不发送 Bearer Token，先确认 `/api/devices` 是否允许匿名读取。
+- 确认卡片已读取登录 Token，且 `/api/devices` 接受 Bearer 认证；未登录或 Token 失效时卡片显示“登录后查看”。
 - 检查 Form Ability 是否能初始化 Preferences。
 - 检查卡片网络请求的 5 秒超时。
 - 查看 `SmartHomeForm` 标签的 Hilog。
@@ -926,20 +923,15 @@ Unable to find 'sdk.dir' in 'local.properties' or 'OHOS_BASE_SDK_HOME'
 
 ### P0：发布前必须处理
 
-1. **撤销并轮换签名凭据。** 当前 `build-profile.json5` 暴露签名口令和本机材料路径。
-2. **强制 TLS。** REST 与 WebSocket 改为 HTTPS/WSS，生产网络配置禁止全局明文。
-3. **重做门锁安全链路。** 使用认证加密、服务器挑战、时效和防重放；删除零 IV、明文和演示值回退。
-4. **保护本地密钥。** 迁移到 HUKS 或等价安全存储。
+1. **强制 TLS。** REST 与 WebSocket 改为 HTTPS/WSS，生产网络配置禁止全局明文。
+2. **重做门锁安全链路。** 使用认证加密、服务器挑战、时效和防重放。
+3. **保护本地密钥。** 迁移到 HUKS 或等价安全存储。
 
 ### P1：稳定性与正确性
 
-1. **修复 WebSocket 主动断开后的重连。** `disconnectWS()` 调用 `close()` 后，`close` 事件仍可能再次启动重连定时器；应增加 `shouldReconnect` 标志并在主动关闭时禁用。
-2. **拆分认证与服务器设置。** 退出登录只清除 Token/AES Key，不应删除服务器 URL。
-3. **统一卡片请求。** Form Ability 应复用认证、错误处理、DTO 映射和服务器配置。
-4. **提供服务器配置 UI。** 当前 `setBaseUrl()` 无调用点，部署环境只能改代码或预置 Preferences。
-5. **区分无数据与数值 0。** `roomSensorValue()` 使用 `value > 0` 判断可用性，会把合法的 `0°C`/`0%` 当作未采集。
-6. **完善 WebSocket 错误恢复。** `error` 事件本身不安排重连，依赖随后一定触发 `close`。
-7. **为 Preferences 初始化失败增加重试。** 当前初始化 Promise 一旦失败仍保持已完成状态。
+1. **统一卡片请求。** Form Ability 已统一认证、失败状态和服务器配置，后续可继续复用 API DTO 映射。
+2. **提供服务器配置 UI。** 当前 `setBaseUrl()` 无调用点，部署环境只能改代码或预置 Preferences。
+3. **补充协议契约测试。** 为规则 `room_id`、时间戳格式和卡片聚合语义增加后端契约用例。
 
 ### P2：可维护性与体验
 
@@ -993,7 +985,7 @@ local.properties
 1. 先更新后端 API Schema 和兼容策略。
 2. 修改 `ApiClient.ets` 中请求路径、请求体和映射函数。
 3. 修改 `DeviceModel.ets` 中对应模型。
-4. 检查首页聚合接口、卡片匿名接口和 WebSocket 消息是否受影响。
+4. 检查首页聚合接口、卡片设备接口和 WebSocket 消息是否受影响。
 5. 增加旧版/新版响应的契约测试。
 6. 更新本文的端点表和 JSON 示例。
 

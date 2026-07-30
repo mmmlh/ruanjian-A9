@@ -4,6 +4,10 @@ export namespace UiText {
   export const connectionRefused: string = '连接被拒绝，请检查服务器地址和端口。'
   export const tlsValidationFailed: string = 'TLS 或证书校验失败。'
   export const emptyResponseBody: string = '响应内容为空'
+  export const invalidAuthResponse: string = '登录响应缺少有效凭据，请稍后重试。'
+  export const sessionExpired: string = '登录状态已失效，请重新登录。'
+  export const secureCommandUnavailable: string = '安全凭据不可用，已阻止设备指令。请重新登录后再试。'
+  export const passwordChangeRejected: string = '密码修改未生效，请确认当前密码后重试。'
 
   export function mapTransportMessage(message: string): string {
     if (!message) {

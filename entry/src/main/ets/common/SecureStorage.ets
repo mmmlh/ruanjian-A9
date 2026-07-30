@@ -8,8 +8,10 @@ const KEY_SERVER_URL = 'server_url'
 
 let prefsInstance: dataPreferences.Preferences | null = null
 let prefsInitPromise: Promise<void> | null = null
+let prefsContext: Context | null = null
 
 export async function initPreferences(context: Context): Promise<void> {
+  prefsContext = context
   if (prefsInstance) {
     return
   }
@@ -22,11 +24,20 @@ export async function initPreferences(context: Context): Promise<void> {
       }
     })()
   }
-  await prefsInitPromise
+  let currentInit = prefsInitPromise
+  await currentInit
+  if (!prefsInstance && prefsInitPromise === currentInit) {
+    prefsInitPromise = null
+  }
 }
 
 async function ensurePreferencesReady(): Promise<void> {
-  if (prefsInitPromise) {
+  if (prefsInstance) {
+    return
+  }
+  if (prefsContext) {
+    await initPreferences(prefsContext)
+  } else if (prefsInitPromise) {
     await prefsInitPromise
   }
 }
@@ -80,7 +91,8 @@ export async function clearAuthData(): Promise<void> {
   await ensurePreferencesReady()
   if (!prefsInstance) return
   try {
-    await prefsInstance.clear()
+    await prefsInstance.delete(KEY_TOKEN)
+    await prefsInstance.delete(KEY_AES_KEY)
     await prefsInstance.flush()
   } catch (e) {
     console.error('clearAuthData failed', e)

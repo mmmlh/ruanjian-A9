@@ -1,4 +1,4 @@
-import { getToken, initApiClient, login } from '../common/ApiClient'
+import { getMe, getToken, initApiClient, login } from '../common/ApiClient'
 import { ControlCenterTheme } from '../common/ControlCenterTheme'
 import { StatusBanner } from '../common/ControlCenterKit'
 import { UiText } from '../common/UiText'
@@ -20,11 +20,20 @@ struct LoginPage {
   @State err: string = ''
 
   aboutToAppear(): void {
-    initApiClient().then(() => {
-      if (getToken()) {
-        this.getUIContext().getRouter().replaceUrl({ url: 'pages/DashboardPage' })
+    this.restoreSession()
+  }
+
+  async restoreSession(): Promise<void> {
+    try {
+      await initApiClient()
+      if (!getToken()) {
+        return
       }
-    })
+      await getMe()
+      this.getUIContext().getRouter().replaceUrl({ url: 'pages/DashboardPage' })
+    } catch (err) {
+      this.err = localizeMessage((err as Error).message, '无法验证登录状态，请重新登录')
+    }
   }
 
   build() {

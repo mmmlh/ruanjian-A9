@@ -251,23 +251,39 @@ struct DashboardPage {
   @State lastSynced: string = ''
   @State lastSyncedAt: number = 0
   @State pendingSceneId: number = -1
+  private pageSession: number = 0
+  private loadGeneration: number = 0
+  private realtimeQueue: string[] = []
 
   aboutToAppear(): void {
-    this.ld()
+    let session = ++this.pageSession
+    this.startPage(session)
+  }
+
+  aboutToDisappear(): void {
+    this.pageSession++
+    disconnectWS()
+  }
+
+  async startPage(session: number): Promise<void> {
+    await this.ld()
+    if (session !== this.pageSession) {
+      return
+    }
     connectWS((msg: string) => this.ws(msg), (connected: boolean) => {
       this.ok = connected
     })
   }
 
-  aboutToDisappear(): void {
-    disconnectWS()
-  }
-
   async ld(): Promise<void> {
+    let loadId = ++this.loadGeneration
     this.loading = true
     this.errorMessage = ''
     try {
       let summary = await getDashboardSummary()
+      if (loadId !== this.loadGeneration) {
+        return
+      }
       this.rooms = summary.rooms
       this.devices = summary.devices
       this.scenes = summary.scenes
@@ -278,6 +294,9 @@ struct DashboardPage {
       this.lastSynced = this.syncTime()
       this.lastSyncedAt = new Date().getTime()
     } catch (err) {
+      if (loadId !== this.loadGeneration) {
+        return
+      }
       let message = localizeMessage((err as Error).message, '加载全屋总览失败')
       if (this.lastSyncedAt === 0) {
         this.errorMessage = message
@@ -288,7 +307,10 @@ struct DashboardPage {
         }
       }
     } finally {
-      this.loading = false
+      if (loadId === this.loadGeneration) {
+        this.loading = false
+        this.flushRealtimeQueue()
+      }
     }
   }
 
@@ -402,6 +424,25 @@ struct DashboardPage {
   }
 
   ws(msg: string): void {
+    if (this.loading) {
+      if (this.realtimeQueue.length >= 100) {
+        this.realtimeQueue.shift()
+      }
+      this.realtimeQueue.push(msg)
+      return
+    }
+    this.applyRealtimeMessage(msg)
+  }
+
+  flushRealtimeQueue(): void {
+    let pending = this.realtimeQueue
+    this.realtimeQueue = []
+    for (let i = 0; i < pending.length; i++) {
+      this.applyRealtimeMessage(pending[i])
+    }
+  }
+
+  applyRealtimeMessage(msg: string): void {
     try {
       let data = JSON.parse(msg) as Record<string, Object>
       if (data['type'] === 'mqtt') {

@@ -55,6 +55,8 @@ export class ChangePasswordRequest {
 
 let cachedToken: string = ''
 let cachedAesKey: string = ''
+let sessionExpiredHandler: (() => void) | null = null
+let sessionInvalidating: boolean = false
 
 function stringifyUnknownError(err: Object): string {
   if (err === null || err === undefined) {
@@ -267,9 +269,30 @@ export function getBaseUrl(): string {
 }
 
 export async function setToken(token: string): Promise<void> {
+  if (!token.trim()) {
+    throw new Error(UiText.invalidAuthResponse)
+  }
   cachedToken = token
   cachedAesKey = extractAesKey(token)
+  sessionInvalidating = false
   await saveAuthData(token, cachedAesKey)
+}
+
+export function setSessionExpiredHandler(handler: (() => void) | null): void {
+  sessionExpiredHandler = handler
+}
+
+async function invalidateSession(): Promise<void> {
+  if (sessionInvalidating) {
+    return
+  }
+  sessionInvalidating = true
+  cachedToken = ''
+  cachedAesKey = ''
+  await clearAuthData()
+  if (sessionExpiredHandler) {
+    sessionExpiredHandler()
+  }
 }
 
 export function getToken(): string {
@@ -311,6 +334,11 @@ async function request<T>(method: http.RequestMethod, path: string, data?: Objec
         throw new Error(UiText.emptyResponseBody)
       }
       return JSON.parse(raw) as T
+    }
+
+    if ((response.responseCode === 401 || response.responseCode === 403) && cachedToken) {
+      await invalidateSession()
+      throw new Error(UiText.sessionExpired)
     }
 
     let detailMessage = UiText.requestFailed(response.responseCode)
@@ -355,6 +383,9 @@ export async function login(username: string, password: string): Promise<LoginRe
   )
   let resp = new LoginResponse()
   resp.token = readString(result, 'token')
+  if (!resp.token.trim()) {
+    throw new Error(UiText.invalidAuthResponse)
+  }
   let userObj = result['user']
   if (userObj !== undefined && userObj !== null) {
     resp.user = mapUserInfo(userObj as Record<string, Object>)
@@ -373,6 +404,9 @@ export async function register(username: string, password: string): Promise<Logi
   )
   let resp = new LoginResponse()
   resp.token = readString(result, 'token')
+  if (!resp.token.trim()) {
+    throw new Error(UiText.invalidAuthResponse)
+  }
   let userObj = result['user']
   if (userObj !== undefined && userObj !== null) {
     resp.user = mapUserInfo(userObj as Record<string, Object>)
@@ -534,28 +568,27 @@ export async function getDevice(deviceId: number): Promise<Device> {
 }
 
 export async function callService(entityId: string, action: string, params?: Object): Promise<ServiceCallResult> {
-  let body: Record<string, Object> = {
-    'entity_id': entityId,
-    'action': action
-  }
-  if (params) {
-    body['params'] = params
+  let aesKey = getAesKey()
+  if (!aesKey) {
+    throw new Error(UiText.secureCommandUnavailable)
   }
 
-  let aesKey = getAesKey()
-  if (aesKey) {
-    let cmd: Record<string, Object> = { 'action': action }
-    if (params) {
-      cmd['params'] = params
-    }
-    let cmdStr = JSON.stringify(cmd)
-    let encrypted = await aesEncrypt(cmdStr, aesKey)
-    if (encrypted) {
-      body['action'] = 'encrypted'
-      let er = new EncryptedParams()
-      er.encrypted = encrypted
-      body['params'] = er
-    }
+  let cmd: Record<string, Object> = { 'action': action }
+  if (params) {
+    cmd['params'] = params
+  }
+  let encrypted = ''
+  try {
+    encrypted = await aesEncrypt(JSON.stringify(cmd), aesKey)
+  } catch (err) {
+    throw new Error(UiText.secureCommandUnavailable)
+  }
+  let encryptedParams = new EncryptedParams()
+  encryptedParams.encrypted = encrypted
+  let body: Record<string, Object> = {
+    'entity_id': entityId,
+    'action': 'encrypted',
+    'params': encryptedParams
   }
 
   let result: Record<string, Object> = await request<Record<string, Object>>(
@@ -665,6 +698,10 @@ export async function getRuleOptions(): Promise<RuleOptions> {
     option.device_id = readNumber(targetRecord, 'device_id')
     option.label = readString(targetRecord, 'label')
     option.type = readString(targetRecord, 'type')
+    let roomId = targetRecord['room_id']
+    if (roomId !== undefined && roomId !== null) {
+      option.room_id = String(roomId)
+    }
     option.room_name = readString(targetRecord, 'room_name')
     let targetActions = targetRecord['actions']
     if (targetActions !== undefined && targetActions !== null) {
@@ -748,6 +785,7 @@ export async function changePassword(oldPwd: string, newPwd: string): Promise<bo
 export async function logout(): Promise<void> {
   cachedToken = ''
   cachedAesKey = ''
+  sessionInvalidating = false
   await clearAuthData()
 }
 

@@ -152,23 +152,26 @@ export struct StatusBanner {
   }
 
   build() {
-    Row() {
+    Column() {
       Text(this.message)
         .fontSize(ControlCenterTheme.bodySize)
         .fontWeight(FontWeight.Medium)
         .fontColor(this.fg())
-        .layoutWeight(1)
+        .width('100%')
       if (this.detail) {
         Text(this.detail)
           .fontSize(ControlCenterTheme.assistSize)
           .fontColor(this.fg())
           .opacity(0.72)
+          .width('100%')
+          .margin({ top: 4 })
       }
     }
     .width('100%')
     .padding({ left: 14, right: 14, top: 12, bottom: 12 })
     .borderRadius(ControlCenterTheme.radiusInner)
     .backgroundColor(this.bg())
+    .alignItems(HorizontalAlign.Start)
   }
 }
 

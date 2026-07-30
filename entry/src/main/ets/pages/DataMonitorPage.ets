@@ -37,10 +37,21 @@ struct DataMonitorPage {
   @State loading: boolean = true
   @State historyLoading: boolean = false
   @State logsLoading: boolean = false
+  @State liveRefreshing: boolean = false
+  @State liveUpdatedAt: string = ''
   @State errorMessage: string = ''
+  private liveTimer: number = -1
 
   aboutToAppear(): void {
     this.load()
+    this.startLiveRefresh()
+  }
+
+  aboutToDisappear(): void {
+    if (this.liveTimer > 0) {
+      clearInterval(this.liveTimer)
+      this.liveTimer = -1
+    }
   }
 
   async load(): Promise<void> {
@@ -48,8 +59,10 @@ struct DataMonitorPage {
     this.errorMessage = ''
     try {
       await this.loadSensors()
-      this.sdata = await getSensorHistory(undefined, 60, this.historyStart())
-      this.logs = await getDeviceLogs(undefined, 40)
+      let historyPromise = getSensorHistory(undefined, 60, this.historyStart())
+      let logsPromise = getDeviceLogs(undefined, 40)
+      this.sdata = this.sortHistory(await historyPromise)
+      this.logs = await logsPromise
     } catch (err) {
       this.errorMessage = localizeMessage((err as Error).message, '加载监测数据失败')
     } finally {
@@ -66,6 +79,46 @@ struct DataMonitorPage {
       }
     }
     this.sensors = sensors
+    this.liveUpdatedAt = this.currentTime()
+  }
+
+  startLiveRefresh(): void {
+    if (this.liveTimer > 0) {
+      clearInterval(this.liveTimer)
+    }
+    this.liveTimer = setInterval(() => {
+      if (this.tab === 0) {
+        this.refreshLiveSensors()
+      }
+    }, 10000)
+  }
+
+  async refreshLiveSensors(): Promise<void> {
+    if (this.liveRefreshing || this.loading) {
+      return
+    }
+    this.liveRefreshing = true
+    try {
+      await this.loadSensors()
+    } catch (err) {
+      // Keep the last valid readings when a background refresh fails.
+    } finally {
+      this.liveRefreshing = false
+    }
+  }
+
+  currentTime(): string {
+    let now = new Date()
+    let hours = now.getHours().toString().padStart(2, '0')
+    let minutes = now.getMinutes().toString().padStart(2, '0')
+    let seconds = now.getSeconds().toString().padStart(2, '0')
+    return hours + ':' + minutes + ':' + seconds
+  }
+
+  sortHistory(items: SensorDataItem[]): SensorDataItem[] {
+    let sorted = items.slice()
+    sorted.sort((left: SensorDataItem, right: SensorDataItem) => right.timestamp.localeCompare(left.timestamp))
+    return sorted
   }
 
   async refresh(): Promise<void> {
@@ -73,7 +126,7 @@ struct DataMonitorPage {
     try {
       if (this.tab === 1) {
         this.historyLoading = true
-        this.sdata = await getSensorHistory(this.curId > 0 ? this.curId : undefined, 60, this.historyStart())
+        this.sdata = this.sortHistory(await getSensorHistory(this.curId > 0 ? this.curId : undefined, 60, this.historyStart()))
         return
       }
       if (this.tab === 2) {
@@ -159,13 +212,21 @@ struct DataMonitorPage {
   }
 
   historyInsight(): string {
+    let humidityChecked = false
+    let temperatureChecked = false
     for (let index = 0; index < this.sdata.length; index++) {
       let item = this.sdata[index]
-      if ((item.data_type === 'humidity' || item.data_type === 'humidity_sensor') && item.value < 40) {
-        return '湿度偏低：当前低于 40%，建议检查加湿器或通风状态。'
+      if (!humidityChecked && (item.data_type === 'humidity' || item.data_type === 'humidity_sensor')) {
+        humidityChecked = true
+        if (item.value < 40) {
+          return '湿度偏低：最新采样低于 40%，建议检查加湿器或通风状态。'
+        }
       }
-      if ((item.data_type === 'temperature' || item.data_type === 'temperature_sensor') && item.value > 28) {
-        return '温度偏高：当前高于 28°C，建议检查空调或通风状态。'
+      if (!temperatureChecked && (item.data_type === 'temperature' || item.data_type === 'temperature_sensor')) {
+        temperatureChecked = true
+        if (item.value > 28) {
+          return '温度偏高：最新采样高于 28°C，建议检查空调或通风状态。'
+        }
       }
     }
     return ''
@@ -243,7 +304,7 @@ struct DataMonitorPage {
         if (!value) continue
         if (key === 'temp') {
           value = value + DEGREE
-        } else if (key === 'brightness' || key === 'position' || key === 'level' || key === 'target_humidity') {
+        } else if (key === 'brightness' || key === 'position' || key === 'target_humidity') {
           value = value + '%'
         } else if (key === 'power_watts') {
           value = value + 'W'
@@ -432,7 +493,7 @@ struct DataMonitorPage {
 
               Text(device.name).fontSize(15).fontWeight(FontWeight.Bold).fontColor(TEXT_PRIMARY).margin({ top: 14 })
               Text(this.liveValue(device)).fontSize(28).fontWeight(FontWeight.Bold).fontColor(PRIMARY).margin({ top: 8 })
-              Text(device.room_name || '传感节点').fontSize(ControlCenterTheme.assistSize).fontColor(TEXT_SECONDARY).margin({ top: 6 })
+              Text((device.room_name || '传感节点') + (this.liveUpdatedAt ? ' · ' + this.liveUpdatedAt : '')).fontSize(ControlCenterTheme.assistSize).fontColor(TEXT_SECONDARY).margin({ top: 6 })
             }
             .padding(16)
             .borderRadius(22)

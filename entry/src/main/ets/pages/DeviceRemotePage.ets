@@ -145,7 +145,7 @@ struct DeviceRemotePage {
         continue
       }
       let status = parseDeviceStatus(sensor.status_json)
-      if (status.value > 0) {
+      if (status.valueKnown) {
         return status.value.toString() + suffix
       }
     }

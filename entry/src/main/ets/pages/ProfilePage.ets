@@ -67,7 +67,10 @@ struct ProfilePage {
     }
     this.changing = true
     try {
-      await changePassword(this.old, this.np)
+      let changed = await changePassword(this.old, this.np)
+      if (!changed) {
+        throw new Error(UiText.passwordChangeRejected)
+      }
       this.pageOk = '密码修改成功'
       this.old = ''
       this.np = ''

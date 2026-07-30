@@ -114,6 +114,8 @@ struct DeviceManagePage {
   @State loading: boolean = false
   @State scanning: boolean = false
   @State binding: boolean = false
+  @State saving: boolean = false
+  @State deletingId: number = -1
   @State showEdit: boolean = false
   @State eid: number = -1
   @State en: string = ''
@@ -125,6 +127,7 @@ struct DeviceManagePage {
   @State ok: string = ''
   @State viewMode: number = 0
   @State initialLoadComplete: boolean = false
+  @State discoveryLoaded: boolean = false
   @State deleteTargetId: number = -1
   @State deleteTargetName: string = ''
 
@@ -136,12 +139,13 @@ struct DeviceManagePage {
     this.loading = true
     this.err = ''
     try {
-      this.devices = await getDevicesForUi()
-      this.rooms = await getRooms()
+      let devicesPromise = getDevicesForUi()
+      let roomsPromise = getRooms()
+      this.devices = await devicesPromise
+      this.rooms = await roomsPromise
       if (this.rooms.length > 0 && this.bindRoomId === 0) {
         this.bindRoomId = this.rooms[0].id
       }
-      await this.scanCandidates(false)
     } catch (err) {
       let message = localizeMessage((err as Error).message, '加载设备列表失败')
       if (!this.initialLoadComplete) {
@@ -159,9 +163,13 @@ struct DeviceManagePage {
   }
 
   async scanCandidates(showSuccess: boolean = true): Promise<void> {
+    if (this.scanning) {
+      return
+    }
     this.scanning = true
     try {
       this.discovered = await discoverDevices()
+      this.discoveryLoaded = true
       if (showSuccess) {
         this.ok = this.discovered.length > 0 ? '候选设备列表已刷新' : '暂未发现新的候选设备'
       }
@@ -173,6 +181,10 @@ struct DeviceManagePage {
   }
 
   async doDel(id: number): Promise<void> {
+    if (this.deletingId > 0) {
+      return
+    }
+    this.deletingId = id
     this.err = ''
     this.ok = ''
     try {
@@ -181,6 +193,10 @@ struct DeviceManagePage {
       await this.ld()
     } catch (err) {
       this.err = localizeMessage((err as Error).message, '删除设备失败')
+    } finally {
+      this.deletingId = -1
+      this.deleteTargetId = -1
+      this.deleteTargetName = ''
     }
   }
 
@@ -191,19 +207,21 @@ struct DeviceManagePage {
 
   async confirmDelete(): Promise<void> {
     let id = this.deleteTargetId
-    this.deleteTargetId = -1
-    this.deleteTargetName = ''
     if (id > 0) {
       await this.doDel(id)
     }
   }
 
   async doSave(): Promise<void> {
+    if (this.saving) {
+      return
+    }
     this.err = ''
     if (!this.en.trim()) {
       this.err = '设备名称不能为空'
       return
     }
+    this.saving = true
     try {
       await updateDeviceName(this.eid, this.en.trim(), this.eb.trim())
       this.showEdit = false
@@ -211,6 +229,8 @@ struct DeviceManagePage {
       await this.ld()
     } catch (err) {
       this.err = localizeMessage((err as Error).message, '保存设备信息失败')
+    } finally {
+      this.saving = false
     }
   }
 
@@ -246,10 +266,18 @@ struct DeviceManagePage {
       this.bindTargetId = ''
       this.bindName = ''
       await this.ld()
+      await this.scanCandidates(false)
     } catch (err) {
       this.err = localizeMessage((err as Error).message, '绑定设备失败')
     } finally {
       this.binding = false
+    }
+  }
+
+  switchViewMode(mode: number): void {
+    this.viewMode = mode
+    if (mode === 1 && !this.discoveryLoaded && !this.scanning) {
+      this.scanCandidates(false)
     }
   }
 
@@ -365,8 +393,8 @@ struct DeviceManagePage {
 
   @Builder buildDeviceTabs() {
     Row() {
-      this.deviceTab('已绑定', 0, () => { this.viewMode = 0 })
-      this.deviceTab('待绑定', 1, () => { this.viewMode = 1 })
+      this.deviceTab('已绑定', 0, () => this.switchViewMode(0))
+      this.deviceTab('待绑定', 1, () => this.switchViewMode(1))
     }
     .width('100%')
     .padding(4)
@@ -552,7 +580,7 @@ struct DeviceManagePage {
               .backgroundColor(DEVICE_ACTION_PRIMARY)
               .fontColor('#FFFFFF')
               .borderRadius(ControlCenterTheme.radiusInner)
-              .enabled(!this.binding || this.bindTargetId !== candidate.id)
+              .enabled(!this.binding)
               .margin({ top: 10 })
               .onClick(() => {
                 this.ob(candidate)
@@ -585,8 +613,8 @@ struct DeviceManagePage {
         Row() {
           Button('取消').width('45%').height(ControlCenterTheme.tapTarget).fontSize(13).backgroundColor(DEVICE_ACTION_SECONDARY_BG)
             .fontColor(DEVICE_ACTION_SECONDARY_FG).borderRadius(12).onClick(() => { this.showEdit = false })
-          Button('保存').width('45%').height(ControlCenterTheme.tapTarget).fontSize(13).backgroundColor(DEVICE_ACTION_PRIMARY)
-            .fontColor('#FFFFFF').borderRadius(12).onClick(() => this.doSave())
+          Button(this.saving ? '保存中...' : '保存').width('45%').height(ControlCenterTheme.tapTarget).fontSize(13).backgroundColor(DEVICE_ACTION_PRIMARY)
+            .fontColor('#FFFFFF').borderRadius(12).enabled(!this.saving).onClick(() => this.doSave())
         }
         .width('100%').justifyContent(FlexAlign.SpaceBetween).margin({ top: 14 })
       }
@@ -620,7 +648,7 @@ struct DeviceManagePage {
               this.deleteTargetName = ''
             })
           Blank().width(10)
-          Button('确认删除')
+          Button(this.deletingId > 0 ? '删除中...' : '确认删除')
             .layoutWeight(1)
             .height(ControlCenterTheme.tapTarget)
             .fontSize(ControlCenterTheme.bodySize)
@@ -628,6 +656,7 @@ struct DeviceManagePage {
             .fontColor('#FFFFFF')
             .backgroundColor(ControlCenterTheme.danger)
             .borderRadius(ControlCenterTheme.radiusInner)
+            .enabled(this.deletingId < 0)
             .onClick(() => this.confirmDelete())
         }
         .width('100%')
