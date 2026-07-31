@@ -53,8 +53,14 @@ def parse_action_json(raw: str) -> list[dict[str, Any]]:
             raise RulePayloadError("invalid_action_json")
         if "room_id" in action and not isinstance(action["room_id"], str):
             raise RulePayloadError("invalid_action_json")
-        if "device_id" in action and not isinstance(action["device_id"], int):
-            raise RulePayloadError("invalid_action_json")
+        if "device_id" in action:
+            device_id = action["device_id"]
+            if (
+                isinstance(device_id, bool)
+                or not isinstance(device_id, int)
+                or device_id <= 0
+            ):
+                raise RulePayloadError("invalid_action_json")
         if not isinstance(params, dict):
             raise RulePayloadError("invalid_action_json")
 

@@ -928,6 +928,50 @@ class TestDeviceStateProjection:
 
         assert projection.get(4) == {"power": "off"}
 
+    def test_update_isolates_nested_state_from_source_mutation(self):
+        from app.services.device_state_projection import DeviceStateProjection
+
+        projection = DeviceStateProjection()
+        source = {
+            "details": {
+                "history": [
+                    {"power": "off"},
+                ]
+            }
+        }
+
+        projection.update(4, source)
+        source["details"]["history"][0]["power"] = "on"
+
+        assert projection.get(4)["details"]["history"][0]["power"] == "off"
+
+    def test_get_isolates_nested_state_from_returned_value_mutation(self):
+        from app.services.device_state_projection import DeviceStateProjection
+
+        projection = DeviceStateProjection()
+        projection.update(
+            4,
+            {"details": {"history": [{"power": "off"}]}},
+        )
+
+        returned = projection.get(4)
+        returned["details"]["history"][0]["power"] = "on"
+
+        assert projection.get(4)["details"]["history"][0]["power"] == "off"
+
+    def test_rebuild_isolates_nested_state_from_loader_result_mutation(self):
+        from app.services.device_state_projection import DeviceStateProjection
+
+        projection = DeviceStateProjection()
+        loaded = {
+            4: {"details": {"history": [{"power": "off"}]}},
+        }
+
+        projection.rebuild(lambda: loaded)
+        loaded[4]["details"]["history"][0]["power"] = "on"
+
+        assert projection.get(4)["details"]["history"][0]["power"] == "off"
+
     def test_internal_encrypted_command_is_rejected_before_side_effects(
         self,
         client,

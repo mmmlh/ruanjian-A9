@@ -197,11 +197,14 @@ class RuleEngine:
             if target_room == "same":
                 target_room = room_id
 
-            explicit_device_id = action.get("device_id")
-            if isinstance(explicit_device_id, int) and not isinstance(
-                explicit_device_id,
-                bool,
-            ):
+            if "device_id" in action:
+                explicit_device_id = action["device_id"]
+                if (
+                    isinstance(explicit_device_id, bool)
+                    or not isinstance(explicit_device_id, int)
+                    or explicit_device_id <= 0
+                ):
+                    raise RulePayloadError("invalid_action_json")
                 device_id = explicit_device_id
             else:
                 device_id = self._get_device_id(target_room, device_type)

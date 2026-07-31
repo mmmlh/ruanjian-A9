@@ -140,6 +140,72 @@ class TestRules:
         assert response.status_code == 400
         assert response.json()["detail"] == "invalid_action_json"
 
+    @pytest.mark.parametrize("device_id", [True, False, 0, -1])
+    def test_create_rule_rejects_non_positive_integer_device_id(
+        self,
+        client,
+        auth_headers,
+        device_id,
+    ):
+        response = client.post(
+            "/api/rules",
+            json={
+                "name": "invalid device target",
+                "condition_json": json.dumps(
+                    {
+                        "trigger": "pir_sensor",
+                        "field": "presence",
+                        "operator": "eq",
+                        "value": True,
+                    }
+                ),
+                "action_json": json.dumps(
+                    [
+                        {
+                            "device_type": "light",
+                            "device_id": device_id,
+                            "action": "on",
+                            "params": {},
+                        }
+                    ]
+                ),
+            },
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "invalid_action_json"
+
+    def test_create_rule_accepts_positive_integer_device_id(self, client, auth_headers):
+        response = client.post(
+            "/api/rules",
+            json={
+                "name": "explicit device target",
+                "condition_json": json.dumps(
+                    {
+                        "trigger": "pir_sensor",
+                        "field": "presence",
+                        "operator": "eq",
+                        "value": True,
+                    }
+                ),
+                "action_json": json.dumps(
+                    [
+                        {
+                            "device_type": "light",
+                            "device_id": 4,
+                            "action": "on",
+                            "params": {},
+                        }
+                    ]
+                ),
+            },
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200
+        assert response.json()["name"] == "explicit device target"
+
     def test_update_rule_rejects_invalid_action_json(self, client, auth_headers):
         response = client.put(
             "/api/rules/1",
@@ -326,6 +392,43 @@ class TestRuleStateIntegration:
         assert db.execute(
             "SELECT COUNT(*) FROM activity_log WHERE event_type = 'rule'"
         ).fetchone()[0] == 0
+
+    @pytest.mark.parametrize("device_id", [True, False, 0, -1])
+    def test_execute_actions_rejects_invalid_explicit_device_id_without_fallback(
+        self,
+        client,
+        monkeypatch,
+        device_id,
+    ):
+        from app.services.rule_payloads import RulePayloadError
+
+        published = []
+        monkeypatch.setattr(
+            device_command_service,
+            "publish_message",
+            lambda topic, payload: published.append((topic, payload)),
+        )
+        monkeypatch.setattr(
+            rule_engine_service.mqtt_client,
+            "publish_message",
+            lambda topic, payload: published.append((topic, payload)),
+        )
+
+        with pytest.raises(RulePayloadError) as exc_info:
+            rule_engine._execute_actions(
+                [
+                    {
+                        "device_type": "light",
+                        "device_id": device_id,
+                        "action": "on",
+                        "params": {},
+                    }
+                ],
+                "livingroom",
+            )
+
+        assert exc_info.value.code == "invalid_action_json"
+        assert published == []
 
     def test_unmapped_historical_target_only_publishes_mqtt(
         self,
