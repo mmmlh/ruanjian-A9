@@ -174,21 +174,7 @@ struct DataMonitorPage {
 
   historyStart(): string {
     let cutoff = new Date(new Date().getTime() - this.historyHours * 60 * 60 * 1000)
-    return this.apiTime(cutoff)
-  }
-
-  apiTime(value: Date): string {
-    let month = value.getMonth() + 1
-    let day = value.getDate()
-    let hour = value.getHours()
-    let minute = value.getMinutes()
-    let second = value.getSeconds()
-    let monthText = month < 10 ? '0' + month.toString() : month.toString()
-    let dayText = day < 10 ? '0' + day.toString() : day.toString()
-    let hourText = hour < 10 ? '0' + hour.toString() : hour.toString()
-    let minuteText = minute < 10 ? '0' + minute.toString() : minute.toString()
-    let secondText = second < 10 ? '0' + second.toString() : second.toString()
-    return value.getFullYear().toString() + '-' + monthText + '-' + dayText + ' ' + hourText + ':' + minuteText + ':' + secondText
+    return toUtcApiTimestamp(cutoff)
   }
 
   historySummary(): string {

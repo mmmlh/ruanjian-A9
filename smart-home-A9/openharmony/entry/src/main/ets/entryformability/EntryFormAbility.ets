@@ -7,6 +7,7 @@ import hilog from '@ohos.hilog'
 import http from '@ohos.net.http'
 import { SERVER_BASE_URL } from '../common/ServerConfig'
 import { initPreferences } from '../common/SecureStorage'
+import { formatUtcClock } from '../common/UtcTimeUtil'
 
 const TAG = 'SmartHomeForm'
 const DOMAIN = 0x0000
@@ -107,8 +108,7 @@ async function fetchDeviceData(): Promise<Record<string, Object>> {
         'locked': locked,
         'curtainOpen': curtainOpen,
         'humidifierOn': humidifierOn,
-        'updateTime': now.getHours().toString().padStart(2, '0') + ':' +
-          now.getMinutes().toString().padStart(2, '0')
+        'updateTime': formatUtcClock(now)
       }
     }
   } catch (e) {

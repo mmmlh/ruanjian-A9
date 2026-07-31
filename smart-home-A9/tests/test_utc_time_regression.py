@@ -112,3 +112,34 @@ def test_business_timestamp_displays_use_the_shared_utc_formatter():
 
     for source in (dashboard, devices, monitor):
         assert "substring(5, 16)" not in source
+
+
+def test_client_generated_times_and_history_queries_are_utc():
+    dashboard = DASHBOARD.read_text(encoding="utf-8")
+    monitor = MONITOR.read_text(encoding="utf-8")
+    form_ability = FORM_ABILITY.read_text(encoding="utf-8")
+
+    assert re.search(
+        r"syncTime\(\): string \{\s*return formatUtcClock\(new Date\(\)\)\s*\}",
+        dashboard,
+    ) is not None
+    assert re.search(
+        r"historyStart\(\): string \{\s*"
+        r"let cutoff = new Date\(new Date\(\)\.getTime\(\) - this\.historyHours \* 60 \* 60 \* 1000\)\s*"
+        r"return toUtcApiTimestamp\(cutoff\)\s*\}",
+        monitor,
+    ) is not None
+    assert "apiTime(" not in monitor
+
+    assert "import { formatUtcClock } from '../common/UtcTimeUtil'" in form_ability
+    assert re.search(
+        r"async function fetchDeviceData\(\): Promise<Record<string, Object>> \{.*?"
+        r"let now = new Date\(\)\s*return \{.*?"
+        r"'updateTime': formatUtcClock\(now\)",
+        form_ability,
+        re.DOTALL,
+    ) is not None
+
+    for source in (dashboard, monitor, form_ability):
+        assert "getHours()" not in source
+        assert "getMinutes()" not in source

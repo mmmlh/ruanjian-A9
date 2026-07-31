@@ -306,12 +306,7 @@ struct DashboardPage {
   }
 
   syncTime(): string {
-    let now = new Date()
-    let hours = now.getHours()
-    let minutes = now.getMinutes()
-    let hourText = hours < 10 ? '0' + hours.toString() : hours.toString()
-    let minuteText = minutes < 10 ? '0' + minutes.toString() : minutes.toString()
-    return hourText + ':' + minuteText
+    return formatUtcClock(new Date())
   }
 
   syncStatusLabel(): string {
