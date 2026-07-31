@@ -3,6 +3,7 @@ import { connectWS, disconnectWS } from '../common/MqttClient'
 import { ControlCenterTheme } from '../common/ControlCenterTheme'
 import { AppTopBar, AppBottomNav, SectionTitle, StatusBanner } from '../common/ControlCenterKit'
 import { UiText } from '../common/UiText'
+import { formatUtcClock, formatUtcTimestamp } from '../common/UtcTimeUtil'
 import { Room, Device, Scene, LogItem, parseDeviceStatus } from '../model/DeviceModel'
 
 function localizeMessage(message: string, fallback: string): string {
@@ -592,10 +593,7 @@ struct DashboardPage {
   }
 
   shortTime(value: string): string {
-    if (!value || value.length < 16) {
-      return value
-    }
-    return value.substring(5, 16)
+    return formatUtcTimestamp(value, value)
   }
 
   formatLogDetail(item: LogItem): string {

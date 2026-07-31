@@ -3,6 +3,7 @@ import { Room, Device, DiscoveredDevice } from '../model/DeviceModel'
 import { UiText } from '../common/UiText'
 import { ControlCenterTheme } from '../common/ControlCenterTheme'
 import { AppTopBar, AppBottomNav, StatusBanner, EmptyState, ConfirmPanel } from '../common/ControlCenterKit'
+import { formatUtcTimestamp } from '../common/UtcTimeUtil'
 
 function localizeMessage(message: string, fallback: string): string {
   if (!message) {
@@ -94,10 +95,7 @@ class DeviceHelper {
     if (!value) {
       return fallback
     }
-    if (value.length >= 16) {
-      return '最近上报 ' + value.substring(5, 16)
-    }
-    return '最近上报 ' + value
+    return '最近上报 ' + formatUtcTimestamp(value, value)
   }
 }
 

@@ -88,3 +88,27 @@ def test_utc_time_utility_executes_behavior_matrix():
         "apiTimestamp": "2025-03-03 21:06:07",
         "utcClock": "21:06 UTC",
     }
+
+
+def test_business_timestamp_displays_use_the_shared_utc_formatter():
+    dashboard = DASHBOARD.read_text(encoding="utf-8")
+    devices = DEVICES.read_text(encoding="utf-8")
+    monitor = MONITOR.read_text(encoding="utf-8")
+
+    assert "import { formatUtcClock, formatUtcTimestamp } from '../common/UtcTimeUtil'" in dashboard
+    assert "return formatUtcTimestamp(value, value)" in dashboard
+
+    assert "import { formatUtcTimestamp } from '../common/UtcTimeUtil'" in devices
+    assert re.search(
+        r"static seenText\(value: string, fallback: string\): string \{\s*"
+        r"if \(!value\) \{\s*return fallback\s*\}\s*"
+        r"return '最近上报 ' \+ formatUtcTimestamp\(value, value\)\s*\}",
+        devices,
+    ) is not None
+    assert "return '最近上报 ' + formatUtcTimestamp(value, value)" in devices
+
+    assert "import { formatUtcTimestamp, toUtcApiTimestamp } from '../common/UtcTimeUtil'" in monitor
+    assert "return formatUtcTimestamp(ts, ts)" in monitor
+
+    for source in (dashboard, devices, monitor):
+        assert "substring(5, 16)" not in source

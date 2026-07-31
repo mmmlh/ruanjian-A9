@@ -3,6 +3,7 @@ import { Device, parseDeviceStatus, SensorDataItem, LogItem } from '../model/Dev
 import { UiText } from '../common/UiText'
 import { ControlCenterTheme } from '../common/ControlCenterTheme'
 import { AppTopBar } from '../common/ControlCenterKit'
+import { formatUtcTimestamp, toUtcApiTimestamp } from '../common/UtcTimeUtil'
 
 const PAGE_BG: string = ControlCenterTheme.pageBg
 const HERO_BG: string = ControlCenterTheme.surface
@@ -168,8 +169,7 @@ struct DataMonitorPage {
   }
 
   tm(ts: string): string {
-    if (!ts || ts.length < 16) return ts
-    return ts.substring(5, 16)
+    return formatUtcTimestamp(ts, ts)
   }
 
   historyStart(): string {
