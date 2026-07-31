@@ -16,8 +16,22 @@ from app.services.discovery_catalog import (
     create_bound_device,
     summarize_candidate_status,
 )
+from app.services.rule_engine import rule_engine
 
 router = APIRouter(prefix="/api/bind_device", tags=["device_binding"])
+
+
+def _reload_device_runtime_after_commit() -> None:
+    try:
+        rule_engine.reload_devices()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "device_runtime_reload_failed",
+                "committed": True,
+            },
+        ) from exc
 
 
 class BindDeviceRequest(BaseModel):
@@ -61,6 +75,7 @@ def bind_device(req: BindDeviceRequest, user: dict = Depends(get_current_user)):
     finally:
         conn.close()
 
+    _reload_device_runtime_after_commit()
     device["status_summary"] = summarize_candidate_status(
         device["type"],
         device.get("status", {}),

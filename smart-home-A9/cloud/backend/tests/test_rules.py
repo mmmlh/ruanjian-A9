@@ -483,3 +483,156 @@ class TestRuleStateIntegration:
         assert db.execute(
             "SELECT COUNT(*) FROM activity_log WHERE event_type = 'rule'"
         ).fetchone()[0] == before_activity + 1
+
+    def test_device_replacement_reloads_legacy_target_without_rule_reload(
+        self,
+        client,
+        auth_headers,
+        db,
+        monkeypatch,
+    ):
+        from app.services.device_state_projection import device_state_projection
+
+        _replace_enabled_rules(
+            db,
+            {
+                "device_type": "light",
+                "action": "on",
+                "params": {"brightness": 64},
+            },
+        )
+        rule_engine.reload_rules()
+        published = []
+        monkeypatch.setattr(
+            device_command_service,
+            "publish_message",
+            lambda topic, payload: published.append((topic, json.loads(payload))),
+        )
+
+        deleted = client.delete("/api/devices/4", headers=auth_headers)
+        assert deleted.status_code == 200
+        assert device_state_projection.get(4) is None
+
+        created = client.post(
+            "/api/devices",
+            json={
+                "room_id": 1,
+                "type": "light",
+                "name": "Replacement light",
+                "mqtt_topic": "home/livingroom/light",
+            },
+            headers=auth_headers,
+        )
+        assert created.status_code == 200
+        replacement_id = created.json()["id"]
+        assert replacement_id != 4
+        assert device_state_projection.get(replacement_id) == {}
+
+        rule_engine.on_sensor_data(
+            "home/livingroom/pir_sensor/sensor",
+            {"presence": True},
+        )
+
+        stored = json.loads(
+            db.execute(
+                "SELECT status_json FROM devices WHERE id = ?",
+                (replacement_id,),
+            ).fetchone()["status_json"]
+        )
+        assert published == [
+            ("home/livingroom/light/command", {"action": "on", "brightness": 64})
+        ]
+        assert stored == {"power": "on", "brightness": 64}
+        assert db.execute(
+            "SELECT COUNT(*) FROM device_log WHERE device_id = ?",
+            (replacement_id,),
+        ).fetchone()[0] == 1
+
+    def test_unmapped_rule_params_cannot_override_validated_action(
+        self,
+        client,
+        monkeypatch,
+    ):
+        published = []
+        monkeypatch.setattr(
+            rule_engine_service.mqtt_client,
+            "publish_message",
+            lambda topic, payload: published.append((topic, json.loads(payload))),
+        )
+
+        rule_engine._execute_actions(
+            [
+                {
+                    "device_type": "light",
+                    "room_id": "garage",
+                    "action": "on",
+                    "params": {"action": "off", "brightness": 12},
+                }
+            ],
+            "livingroom",
+        )
+
+        assert published == [
+            ("home/garage/light/command", {"action": "on", "brightness": 12})
+        ]
+
+    def test_rule_reload_failure_preserves_runtime_snapshot_and_reports_commit(
+        self,
+        client,
+        auth_headers,
+        db,
+        monkeypatch,
+    ):
+        from app.services.device_state_projection import device_state_projection
+
+        previous_rules = [dict(rule) for rule in rule_engine._rules]
+        previous_device_map = dict(rule_engine._device_id_map)
+        previous_light_state = device_state_projection.get(4)
+        monkeypatch.setattr(
+            device_state_projection,
+            "rebuild",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                RuntimeError("projection reload failed")
+            ),
+        )
+        monkeypatch.setattr(client._transport, "raise_server_exceptions", False)
+
+        response = client.post(
+            "/api/rules",
+            json={
+                "name": "Committed but not loaded",
+                "condition_json": json.dumps(
+                    {
+                        "trigger": "temperature_sensor",
+                        "field": "value",
+                        "operator": "gt",
+                        "value": 30,
+                    }
+                ),
+                "action_json": json.dumps(
+                    [
+                        {
+                            "device_id": 4,
+                            "device_type": "light",
+                            "action": "on",
+                            "params": {},
+                        }
+                    ]
+                ),
+                "enabled": 1,
+            },
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 503
+        assert response.json()["detail"] == {
+            "code": "rule_runtime_reload_failed",
+            "committed": True,
+        }
+        assert db.execute(
+            "SELECT 1 FROM automation_rules WHERE name = ?",
+            ("Committed but not loaded",),
+        ).fetchone() is not None
+        assert rule_engine._rules == previous_rules
+        assert rule_engine._device_id_map == previous_device_map
+        assert device_state_projection.get(4) == previous_light_state

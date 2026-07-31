@@ -25,7 +25,7 @@ from app.api import (
 )
 from app.config import CORS_ORIGINS, DEBUG, HOST, PORT
 from app.database import init_db
-from app.services.device_state_projection import device_state_projection
+from app.services.device_state_projection import refresh_device_state
 from app.services.mqtt_client import init_mqtt, stop_mqtt, subscribe
 from app.services.rule_engine import rule_engine
 
@@ -58,8 +58,8 @@ def on_mqtt_message(topic: str, payload):
     _persist_sensor_data(topic, payload)
     synced = _sync_device_status(topic, payload)
     if synced is not None:
-        device_id, status = synced
-        device_state_projection.update(device_id, status)
+        device_id, _ = synced
+        refresh_device_state(device_id)
 
     rule_engine.on_sensor_data(topic, payload)
 
@@ -171,7 +171,7 @@ def _sync_device_status(topic: str, payload) -> tuple[int, dict] | None:
         return synced
     except Exception as exc:
         logger.error("device status sync failed: %s", exc)
-        return None
+        raise
 
 
 @asynccontextmanager

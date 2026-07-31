@@ -1083,3 +1083,674 @@ class TestDeviceStateProjection:
 
         assert calls == []
         assert "non-mapping MQTT payload" in caplog.text
+
+
+class TestProjectionFailureConsistency:
+    def test_refresh_holds_lock_and_update_wins_after_loader_finishes(self):
+        from app.services.device_state_projection import DeviceStateProjection
+
+        projection = DeviceStateProjection()
+        loader_started = threading.Event()
+        release_loader = threading.Event()
+        update_finished = threading.Event()
+
+        def loader():
+            loader_started.set()
+            assert release_loader.wait(timeout=1)
+            return {"details": {"power": "off"}}
+
+        refresh_thread = threading.Thread(
+            target=projection.refresh,
+            args=(4, loader),
+        )
+        refresh_thread.start()
+        assert loader_started.wait(timeout=1)
+
+        def update():
+            projection.update(4, {"details": {"power": "on"}})
+            update_finished.set()
+
+        update_thread = threading.Thread(target=update)
+        update_thread.start()
+        assert not update_finished.wait(timeout=0.05)
+
+        release_loader.set()
+        refresh_thread.join(timeout=1)
+        update_thread.join(timeout=1)
+
+        assert not refresh_thread.is_alive()
+        assert not update_thread.is_alive()
+        assert projection.get(4) == {"details": {"power": "on"}}
+
+    def test_refresh_deep_copies_result_and_removes_missing_device(self):
+        from app.services.device_state_projection import DeviceStateProjection
+
+        projection = DeviceStateProjection()
+        loaded = {"details": {"history": [{"power": "off"}]}}
+
+        returned = projection.refresh(4, lambda: loaded)
+        loaded["details"]["history"][0]["power"] = "on"
+        returned["details"]["history"][0]["power"] = "on"
+
+        assert projection.get(4)["details"]["history"][0]["power"] == "off"
+        assert projection.refresh(4, lambda: None) is None
+        assert projection.get(4) is None
+
+    def test_late_command_refresh_reads_latest_committed_sqlite_state(
+        self,
+        client,
+        db,
+        monkeypatch,
+    ):
+        from app.services.device_state_projection import device_state_projection
+
+        real_refresh = getattr(device_state_projection, "refresh", None)
+        old_refresh_started = threading.Event()
+        release_old_refresh = threading.Event()
+        new_command_finished = threading.Event()
+        errors = []
+
+        def controlled_refresh(device_id, loader):
+            if threading.current_thread().name == "old-command":
+                old_refresh_started.set()
+                if not release_old_refresh.wait(timeout=2):
+                    raise TimeoutError("old refresh was not released")
+            if real_refresh is None:
+                raise AssertionError("refresh is not implemented")
+            return real_refresh(device_id, loader)
+
+        monkeypatch.setattr(
+            device_state_projection,
+            "refresh",
+            controlled_refresh,
+            raising=False,
+        )
+        monkeypatch.setattr(device_command_service, "publish_message", lambda *_: None)
+
+        def run_command(brightness, finished=None):
+            try:
+                device_command_service.execute_device_command(
+                    4,
+                    "set",
+                    {"brightness": brightness},
+                    {"sub": "1"},
+                )
+            except Exception as exc:
+                errors.append(exc)
+            finally:
+                if finished is not None:
+                    finished.set()
+
+        old_thread = threading.Thread(
+            target=run_command,
+            args=(10,),
+            name="old-command",
+            daemon=True,
+        )
+        new_thread = None
+        old_thread.start()
+        try:
+            assert old_refresh_started.wait(timeout=1)
+            new_thread = threading.Thread(
+                target=run_command,
+                args=(90, new_command_finished),
+                name="new-command",
+                daemon=True,
+            )
+            new_thread.start()
+            assert new_command_finished.wait(timeout=2)
+        finally:
+            release_old_refresh.set()
+            old_thread.join(timeout=2)
+            if new_thread is not None:
+                new_thread.join(timeout=2)
+
+        stored = json.loads(
+            db.execute("SELECT status_json FROM devices WHERE id = 4").fetchone()[
+                "status_json"
+            ]
+        )
+        assert errors == []
+        assert not old_thread.is_alive()
+        assert new_thread is not None and not new_thread.is_alive()
+        assert stored["brightness"] == 90
+        assert device_state_projection.get(4)["brightness"] == 90
+
+    def test_mqtt_status_db_failure_stops_projection_rules_and_websocket(
+        self,
+        client,
+        monkeypatch,
+    ):
+        import app.database.connection as connection_module
+        from app.services.device_state_projection import device_state_projection
+
+        baseline = device_state_projection.get(4)
+        calls = []
+
+        class RunningLoop:
+            @staticmethod
+            def is_running():
+                return True
+
+        def fail_get_db():
+            raise RuntimeError("status database unavailable")
+
+        monkeypatch.setattr(connection_module, "get_db", fail_get_db)
+        monkeypatch.setattr(
+            main_module.rule_engine,
+            "on_sensor_data",
+            lambda *_: calls.append("rule"),
+        )
+        monkeypatch.setattr(
+            main_module,
+            "broadcast_ws",
+            lambda *_: calls.append("broadcast"),
+        )
+        monkeypatch.setattr(main_module, "_main_event_loop", RunningLoop())
+        monkeypatch.setattr(
+            main_module.asyncio,
+            "run_coroutine_threadsafe",
+            lambda *_: calls.append("websocket"),
+        )
+
+        with pytest.raises(RuntimeError, match="status database unavailable"):
+            on_mqtt_message(
+                "home/livingroom/light/status",
+                {"power": "on", "brightness": 88},
+            )
+
+        assert calls == []
+        assert device_state_projection.get(4) == baseline
+
+    def test_unrelated_mqtt_topic_has_no_status_sync(self, client):
+        assert main_module._sync_device_status(
+            "home/livingroom/light/telemetry",
+            {"power": "on"},
+        ) is None
+
+    def test_direct_command_hides_post_dispatch_database_failure(
+        self,
+        client,
+        auth_headers,
+        db,
+        monkeypatch,
+    ):
+        real_get_db = device_command_service.get_db
+        get_db_calls = 0
+        published = []
+
+        class FailingDatabaseContext:
+            def __enter__(self):
+                raise sqlite3.OperationalError("private sqlite failure")
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+        def sequenced_get_db():
+            nonlocal get_db_calls
+            get_db_calls += 1
+            if get_db_calls == 1:
+                return real_get_db()
+            return FailingDatabaseContext()
+
+        monkeypatch.setattr(device_command_service, "get_db", sequenced_get_db)
+        monkeypatch.setattr(
+            device_command_service,
+            "publish_message",
+            lambda topic, payload: published.append((topic, json.loads(payload))),
+        )
+        monkeypatch.setattr(client._transport, "raise_server_exceptions", False)
+        before_status = db.execute(
+            "SELECT status_json FROM devices WHERE id = 4"
+        ).fetchone()["status_json"]
+        before_logs = db.execute(
+            "SELECT COUNT(*) FROM device_log WHERE device_id = 4"
+        ).fetchone()[0]
+
+        response = client.post(
+            "/api/devices/4/command",
+            json={"action": "on", "params": {"brightness": 40}},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 502
+        assert response.json()["detail"] == "command_post_dispatch_failed"
+        assert "sqlite" not in response.text.lower()
+        assert published == [
+            ("home/livingroom/light/command", {"action": "on", "brightness": 40})
+        ]
+        assert db.execute(
+            "SELECT status_json FROM devices WHERE id = 4"
+        ).fetchone()["status_json"] == before_status
+        assert db.execute(
+            "SELECT COUNT(*) FROM device_log WHERE device_id = 4"
+        ).fetchone()[0] == before_logs
+
+    def test_direct_command_wraps_projection_refresh_failure_after_commit(
+        self,
+        client,
+        auth_headers,
+        db,
+        monkeypatch,
+    ):
+        from app.services.device_state_projection import device_state_projection
+
+        published = []
+        monkeypatch.setattr(
+            device_command_service,
+            "publish_message",
+            lambda topic, payload: published.append((topic, json.loads(payload))),
+        )
+        monkeypatch.setattr(
+            device_state_projection,
+            "refresh",
+            lambda *_: (_ for _ in ()).throw(RuntimeError("refresh failed")),
+            raising=False,
+        )
+        before_logs = db.execute(
+            "SELECT COUNT(*) FROM device_log WHERE device_id = 4"
+        ).fetchone()[0]
+
+        response = client.post(
+            "/api/devices/4/command",
+            json={"action": "on", "params": {"brightness": 41}},
+            headers=auth_headers,
+        )
+
+        stored = json.loads(
+            db.execute("SELECT status_json FROM devices WHERE id = 4").fetchone()[
+                "status_json"
+            ]
+        )
+        assert response.status_code == 502
+        assert response.json()["detail"] == "command_post_dispatch_failed"
+        assert published == [
+            ("home/livingroom/light/command", {"action": "on", "brightness": 41})
+        ]
+        assert stored["power"] == "on"
+        assert stored["brightness"] == 41
+        assert db.execute(
+            "SELECT COUNT(*) FROM device_log WHERE device_id = 4"
+        ).fetchone()[0] == before_logs + 1
+
+    def test_refresh_failure_invalidates_previous_projection(self):
+        from app.services.device_state_projection import DeviceStateProjection
+
+        projection = DeviceStateProjection()
+        projection.update(4, {"power": "off"})
+
+        with pytest.raises(RuntimeError, match="loader failed"):
+            projection.refresh(
+                4,
+                lambda: (_ for _ in ()).throw(RuntimeError("loader failed")),
+            )
+
+        assert projection.get(4) is None
+
+    def test_state_write_reports_committed_projection_refresh_failure(
+        self,
+        client,
+        auth_headers,
+        db,
+        monkeypatch,
+    ):
+        import app.services.device_state_projection as projection_service
+
+        def fail_loader(device_id):
+            raise RuntimeError(f"cannot reload {device_id}")
+
+        monkeypatch.setattr(projection_service, "load_device_state", fail_loader)
+        monkeypatch.setattr(client._transport, "raise_server_exceptions", False)
+
+        response = client.post(
+            "/api/states/light.device_4",
+            json={"state": "on", "attributes": {"brightness": 77}},
+            headers=auth_headers,
+        )
+
+        stored = json.loads(
+            db.execute("SELECT status_json FROM devices WHERE id = 4").fetchone()[
+                "status_json"
+            ]
+        )
+        assert response.status_code == 503
+        assert response.json()["detail"] == {
+            "code": "state_projection_refresh_failed",
+            "committed": True,
+        }
+        assert stored["power"] == "on"
+        assert stored["brightness"] == 77
+        assert projection_service.device_state_projection.get(4) is None
+
+    def test_command_merges_state_committed_while_publish_is_in_flight(
+        self,
+        client,
+        db,
+        monkeypatch,
+    ):
+        publish_started = threading.Event()
+        release_publish = threading.Event()
+        errors = []
+        before_logs = db.execute(
+            "SELECT COUNT(*) FROM device_log WHERE device_id = 4"
+        ).fetchone()[0]
+        db.execute(
+            "UPDATE devices SET status_json = ? WHERE id = 4",
+            (json.dumps({"power": "off", "brightness": 0}),),
+        )
+        db.commit()
+
+        def publish(*_):
+            publish_started.set()
+            assert release_publish.wait(timeout=3)
+
+        def run_command():
+            try:
+                device_command_service.execute_device_command(
+                    4,
+                    "set",
+                    {"brightness": 10},
+                    {"sub": "1"},
+                )
+            except Exception as exc:
+                errors.append(exc)
+
+        monkeypatch.setattr(device_command_service, "publish_message", publish)
+        command_thread = threading.Thread(target=run_command)
+        command_thread.start()
+        assert publish_started.wait(timeout=2)
+
+        latest = json.loads(
+            db.execute("SELECT status_json FROM devices WHERE id = 4").fetchone()[
+                "status_json"
+            ]
+        )
+        latest["color"] = "red"
+        db.execute(
+            "UPDATE devices SET status_json = ? WHERE id = 4",
+            (json.dumps(latest),),
+        )
+        db.commit()
+        release_publish.set()
+        command_thread.join(timeout=10)
+
+        stored = json.loads(
+            db.execute("SELECT status_json FROM devices WHERE id = 4").fetchone()[
+                "status_json"
+            ]
+        )
+        assert not command_thread.is_alive()
+        assert errors == []
+        assert stored["brightness"] == 10
+        assert stored["color"] == "red"
+        assert db.execute(
+            "SELECT COUNT(*) FROM device_log WHERE device_id = 4"
+        ).fetchone()[0] == before_logs + 1
+
+    def test_concurrent_commands_preserve_publish_and_commit_order(
+        self,
+        client,
+        db,
+        monkeypatch,
+    ):
+        first_published = threading.Event()
+        release_first_publish = threading.Event()
+        second_published = threading.Event()
+        second_finished = threading.Event()
+        published = []
+        errors = []
+        before_log_id = db.execute(
+            "SELECT COALESCE(MAX(id), 0) FROM device_log"
+        ).fetchone()[0]
+        db.execute(
+            "UPDATE devices SET status_json = ? WHERE id = 4",
+            (json.dumps({"power": "off", "brightness": 0}),),
+        )
+        db.commit()
+
+        def publish(_topic, raw_payload):
+            brightness = json.loads(raw_payload)["brightness"]
+            published.append(brightness)
+            if brightness == 10:
+                first_published.set()
+                assert release_first_publish.wait(timeout=3)
+            else:
+                second_published.set()
+
+        def run_command(brightness, finished=None):
+            try:
+                device_command_service.execute_device_command(
+                    4,
+                    "set",
+                    {"brightness": brightness},
+                    {"sub": "1"},
+                )
+            except Exception as exc:
+                errors.append(exc)
+            finally:
+                if finished is not None:
+                    finished.set()
+
+        monkeypatch.setattr(device_command_service, "publish_message", publish)
+        first_thread = threading.Thread(target=run_command, args=(10,))
+        second_thread = threading.Thread(
+            target=run_command,
+            args=(90, second_finished),
+        )
+        first_thread.start()
+        assert first_published.wait(timeout=2)
+        second_thread.start()
+
+        if second_published.wait(timeout=0.2):
+            assert second_finished.wait(timeout=2)
+        release_first_publish.set()
+        first_thread.join(timeout=5)
+        second_thread.join(timeout=5)
+
+        stored = json.loads(
+            db.execute("SELECT status_json FROM devices WHERE id = 4").fetchone()[
+                "status_json"
+            ]
+        )
+        committed = [
+            json.loads(row["detail"])["brightness"]
+            for row in db.execute(
+                "SELECT detail FROM device_log WHERE id > ? ORDER BY id",
+                (before_log_id,),
+            ).fetchall()
+        ]
+        assert not first_thread.is_alive()
+        assert not second_thread.is_alive()
+        assert errors == []
+        assert published == [10, 90]
+        assert committed == published
+        assert stored["brightness"] == 90
+
+
+class TestDeviceLifecycleProjection:
+    def test_bind_success_reloads_device_index_and_projection(
+        self,
+        client,
+        auth_headers,
+        monkeypatch,
+    ):
+        from app.api import discovery as discovery_api
+        from app.services.device_state_projection import device_state_projection
+
+        monkeypatch.setattr(discovery_api, "ROOMS", ["livingroom", "bedroom", "study"])
+        candidate = client.post(
+            "/api/discovery",
+            headers=auth_headers,
+        ).json()["discovered"][0]
+
+        response = client.post(
+            "/api/bind_device",
+            json={"device_id": candidate["id"], "room_id": 1},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200
+        device = response.json()["device"]
+        topic_parts = device["mqtt_topic"].split("/")
+        assert rule_engine._get_device_id(topic_parts[1], topic_parts[2]) == device["id"]
+        assert device_state_projection.get(device["id"]) == device["status"]
+
+        deleted = client.delete(f"/api/devices/{device['id']}", headers=auth_headers)
+        assert deleted.status_code == 200
+
+    def test_failed_device_lifecycle_operations_do_not_reload_devices(
+        self,
+        client,
+        auth_headers,
+        db,
+        monkeypatch,
+    ):
+        reloads = []
+        monkeypatch.setattr(
+            rule_engine,
+            "reload_devices",
+            lambda: reloads.append("reload"),
+            raising=False,
+        )
+
+        duplicate = client.post(
+            "/api/devices",
+            json={
+                "room_id": 1,
+                "type": "light",
+                "name": "Duplicate light",
+                "mqtt_topic": "home/livingroom/light",
+            },
+            headers=auth_headers,
+        )
+        db.execute(
+            "INSERT INTO device_log (device_id, action, detail, user_id) VALUES (?, ?, ?, ?)",
+            (4, "on", "{}", 1),
+        )
+        db.commit()
+        blocked_delete = client.delete("/api/devices/4", headers=auth_headers)
+        missing_bind = client.post(
+            "/api/bind_device",
+            json={"device_id": "missing-candidate", "room_id": 1},
+            headers=auth_headers,
+        )
+
+        assert duplicate.status_code == 409
+        assert blocked_delete.status_code == 409
+        assert missing_bind.status_code == 404
+        assert reloads == []
+
+    def test_reload_devices_failure_invalidates_runtime_state(
+        self,
+        client,
+        monkeypatch,
+    ):
+        from app.services.device_state_projection import device_state_projection
+
+        assert rule_engine._device_id_map
+        assert device_state_projection.get(4) is not None
+        monkeypatch.setattr(
+            device_state_projection,
+            "rebuild",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                RuntimeError("reload failed")
+            ),
+        )
+
+        with pytest.raises(RuntimeError, match="reload failed"):
+            rule_engine.reload_devices()
+
+        assert rule_engine._device_id_map == {}
+        assert device_state_projection.get(4) is None
+
+    def test_create_reports_committed_runtime_reload_failure(
+        self,
+        client,
+        auth_headers,
+        db,
+        monkeypatch,
+    ):
+        def fail_reload():
+            raise RuntimeError("reload failed")
+
+        monkeypatch.setattr(rule_engine, "reload_devices", fail_reload)
+        monkeypatch.setattr(client._transport, "raise_server_exceptions", False)
+        topic = "home/garage/light"
+
+        response = client.post(
+            "/api/devices",
+            json={
+                "room_id": 1,
+                "type": "light",
+                "name": "Committed device",
+                "mqtt_topic": topic,
+            },
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 503
+        assert response.json()["detail"] == {
+            "code": "device_runtime_reload_failed",
+            "committed": True,
+        }
+        assert db.execute(
+            "SELECT 1 FROM devices WHERE mqtt_topic = ?", (topic,)
+        ).fetchone() is not None
+
+    def test_delete_reports_committed_runtime_reload_failure(
+        self,
+        client,
+        auth_headers,
+        db,
+        monkeypatch,
+    ):
+        def fail_reload():
+            raise RuntimeError("reload failed")
+
+        monkeypatch.setattr(rule_engine, "reload_devices", fail_reload)
+        monkeypatch.setattr(client._transport, "raise_server_exceptions", False)
+
+        response = client.delete("/api/devices/4", headers=auth_headers)
+
+        assert response.status_code == 503
+        assert response.json()["detail"] == {
+            "code": "device_runtime_reload_failed",
+            "committed": True,
+        }
+        assert db.execute("SELECT 1 FROM devices WHERE id = 4").fetchone() is None
+
+    def test_bind_reports_committed_runtime_reload_failure(
+        self,
+        client,
+        auth_headers,
+        db,
+        monkeypatch,
+    ):
+        from app.api import discovery as discovery_api
+
+        monkeypatch.setattr(discovery_api, "ROOMS", ["livingroom", "bedroom", "study"])
+        candidate = client.post(
+            "/api/discovery",
+            headers=auth_headers,
+        ).json()["discovered"][0]
+
+        def fail_reload():
+            raise RuntimeError("reload failed")
+
+        monkeypatch.setattr(rule_engine, "reload_devices", fail_reload)
+        monkeypatch.setattr(client._transport, "raise_server_exceptions", False)
+        response = client.post(
+            "/api/bind_device",
+            json={"device_id": candidate["id"], "room_id": 1},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 503
+        assert response.json()["detail"] == {
+            "code": "device_runtime_reload_failed",
+            "committed": True,
+        }
+        assert db.execute(
+            "SELECT 1 FROM devices WHERE mqtt_topic = ?",
+            (candidate["mqtt_topic"],),
+        ).fetchone() is not None

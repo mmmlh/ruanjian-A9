@@ -583,3 +583,71 @@ class TestSceneCommandIntegration:
         assert response.status_code == 409
         assert response.json()["detail"] == "invalid_scene_actions"
         assert published == []
+
+
+class TestScenePostDispatchFailures:
+    def test_post_dispatch_database_failure_counts_published_action(
+        self,
+        client,
+        auth_headers,
+        monkeypatch,
+    ):
+        import sqlite3
+
+        created = client.post(
+            "/api/scenes",
+            json={
+                "name": "Post-dispatch failure",
+                "actions_json": json.dumps(
+                    [
+                        {
+                            "device_id": 4,
+                            "action": "on",
+                            "params": {"brightness": 52},
+                        }
+                    ]
+                ),
+            },
+            headers=auth_headers,
+        )
+        assert created.status_code == 200
+
+        real_get_db = device_command_service.get_db
+        get_db_calls = 0
+        published = []
+
+        class FailingDatabaseContext:
+            def __enter__(self):
+                raise sqlite3.OperationalError("device log unavailable")
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+        def sequenced_get_db():
+            nonlocal get_db_calls
+            get_db_calls += 1
+            if get_db_calls == 1:
+                return real_get_db()
+            return FailingDatabaseContext()
+
+        monkeypatch.setattr(device_command_service, "get_db", sequenced_get_db)
+        monkeypatch.setattr(
+            device_command_service,
+            "publish_message",
+            lambda topic, payload: published.append((topic, json.loads(payload))),
+        )
+
+        response = client.post(
+            f"/api/scenes/{created.json()['id']}/execute",
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 502
+        assert response.json()["detail"] == {
+            "code": "scene_partial_failure",
+            "executed": 1,
+            "failed_index": 0,
+        }
+        assert published == [
+            ("home/livingroom/light/command", {"action": "on", "brightness": 52})
+        ]

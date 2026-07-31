@@ -20,26 +20,6 @@ from app.services.rule_payloads import (
 logger = logging.getLogger(__name__)
 
 
-def load_projection_states() -> dict[int, dict[str, Any]]:
-    with get_db() as conn:
-        devices = conn.execute("SELECT id, status_json FROM devices").fetchall()
-
-    states: dict[int, dict[str, Any]] = {}
-    for device in devices:
-        try:
-            status = json.loads(device["status_json"] or "{}")
-        except (json.JSONDecodeError, TypeError):
-            status = None
-        if not isinstance(status, dict):
-            logger.warning(
-                "invalid device status_json for projection: device_id=%s",
-                device["id"],
-            )
-            status = {}
-        states[device["id"]] = status
-    return states
-
-
 class RuleEngine:
     """In-memory rule engine singleton."""
 
@@ -50,38 +30,32 @@ class RuleEngine:
 
     def reload_rules(self):
         """Reload enabled rules and pre-parse executable payloads."""
-        with get_db() as conn:
-            rows = conn.execute(
-                "SELECT * FROM automation_rules WHERE enabled = 1"
-            ).fetchall()
-            devices = conn.execute(
-                "SELECT id, type, mqtt_topic FROM devices"
-            ).fetchall()
-
-        compiled_rules: list[dict] = []
-        skipped_rules = 0
-        for row in rows:
-            rule = dict(row)
-            try:
-                rule["condition"] = parse_condition_json(rule["condition_json"])
-                rule["actions"] = parse_action_json(rule["action_json"])
-            except RulePayloadError as exc:
-                skipped_rules += 1
-                logger.warning("skipped invalid rule payload [%s]: %s", rule["name"], exc.code)
-                continue
-            compiled_rules.append(rule)
-
-        device_id_map: dict[str, int] = {}
-        for device in devices:
-            parts = device["mqtt_topic"].split("/")
-            if len(parts) >= 3:
-                key = f"{parts[1]}/{parts[2]}"
-                device_id_map[key] = device["id"]
-
         with self._lock:
+            with get_db() as conn:
+                rows = conn.execute(
+                    "SELECT * FROM automation_rules WHERE enabled = 1"
+                ).fetchall()
+
+            compiled_rules: list[dict] = []
+            skipped_rules = 0
+            for row in rows:
+                rule = dict(row)
+                try:
+                    rule["condition"] = parse_condition_json(rule["condition_json"])
+                    rule["actions"] = parse_action_json(rule["action_json"])
+                except RulePayloadError as exc:
+                    skipped_rules += 1
+                    logger.warning(
+                        "skipped invalid rule payload [%s]: %s",
+                        rule["name"],
+                        exc.code,
+                    )
+                    continue
+                compiled_rules.append(rule)
+
+            device_id_map = self._load_device_runtime_locked()
             self._rules = compiled_rules
             self._device_id_map = device_id_map
-            device_state_projection.rebuild(load_projection_states)
 
         logger.info(
             "rule engine loaded %s rules, %s device indexes, skipped=%s",
@@ -89,6 +63,58 @@ class RuleEngine:
             len(device_id_map),
             skipped_rules,
         )
+
+    def _load_device_runtime_locked(
+        self,
+        *,
+        clear_on_failure: bool = False,
+    ) -> dict[str, int]:
+        device_id_map: dict[str, int] = {}
+
+        def load_states() -> dict[int, dict[str, Any]]:
+            with get_db() as conn:
+                devices = conn.execute(
+                    "SELECT id, mqtt_topic, status_json FROM devices"
+                ).fetchall()
+
+            states: dict[int, dict[str, Any]] = {}
+            for device in devices:
+                parts = device["mqtt_topic"].split("/")
+                if len(parts) >= 3:
+                    device_id_map[f"{parts[1]}/{parts[2]}"] = device["id"]
+
+                try:
+                    status = json.loads(device["status_json"] or "{}")
+                except (json.JSONDecodeError, TypeError):
+                    status = None
+                if not isinstance(status, dict):
+                    logger.warning(
+                        "invalid device status_json for projection: device_id=%s",
+                        device["id"],
+                    )
+                    status = {}
+                states[device["id"]] = status
+            return states
+
+        device_state_projection.rebuild(
+            load_states,
+            clear_on_failure=clear_on_failure,
+        )
+        return device_id_map
+
+    def reload_devices(self):
+        """Reload device indexes and projected state after lifecycle changes."""
+        with self._lock:
+            try:
+                device_id_map = self._load_device_runtime_locked(
+                    clear_on_failure=True,
+                )
+            except Exception:
+                self._device_id_map = {}
+                device_state_projection.clear()
+                raise
+            self._device_id_map = device_id_map
+        logger.info("rule engine loaded %s device indexes", len(device_id_map))
 
     def _get_device_id(self, room_id: str, device_type: str) -> int | None:
         key = f"{room_id}/{device_type}"
@@ -221,8 +247,7 @@ class RuleEngine:
                 continue
 
             topic = f"home/{target_room}/{device_type}/command"
-            payload = {"action": action_name}
-            payload.update(params)
+            payload = {**params, "action": action_name}
 
             mqtt_client.publish_message(topic, json.dumps(payload))
             logger.info("rule action: %s -> %s", topic, payload)

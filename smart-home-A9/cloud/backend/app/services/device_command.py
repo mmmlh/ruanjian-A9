@@ -1,10 +1,11 @@
 import json
+import threading
 from typing import Any
 
 from fastapi import HTTPException
 
 from app.database.connection import get_db
-from app.services.device_state_projection import device_state_projection
+from app.services.device_state_projection import refresh_device_state
 from app.services.entity_state import build_state, parse_entity_id
 from app.services.mqtt_client import publish_message
 from app.services.security import aes_decrypt
@@ -33,6 +34,22 @@ PARAMETER_RANGES_BY_DEVICE_TYPE: dict[str, dict[str, tuple[float, float]]] = {
     "curtain": {"position": (0, 100)},
     "humidifier": {"level": (1, 3), "target_humidity": (30, 80)},
 }
+
+_device_command_locks: dict[int, threading.Lock] = {}
+_device_command_locks_guard = threading.Lock()
+
+
+class CommandPostDispatchError(HTTPException):
+    def __init__(self, topic: str, action: str):
+        super().__init__(status_code=502, detail="command_post_dispatch_failed")
+        self.dispatched = True
+        self.topic = topic
+        self.action = action
+
+
+def _get_device_command_lock(device_id: int) -> threading.Lock:
+    with _device_command_locks_guard:
+        return _device_command_locks.setdefault(device_id, threading.Lock())
 
 
 def normalize_and_validate_command(
@@ -178,6 +195,61 @@ def apply_command_to_status(device_type: str, current_status: dict[str, Any], ac
     return status
 
 
+def _dispatch_and_persist_command(
+    device: dict[str, Any],
+    action: str,
+    params: dict[str, Any],
+    payload: dict[str, Any],
+    user: dict | None,
+) -> tuple[str, Any]:
+    device_id = device["id"]
+    topic = device["mqtt_topic"] + "/command"
+
+    with _get_device_command_lock(device_id):
+        try:
+            publish_message(topic, json.dumps(payload))
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail="command_dispatch_failed") from exc
+
+        try:
+            with get_db() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                current = conn.execute(
+                    "SELECT status_json FROM devices WHERE id = ?",
+                    (device_id,),
+                ).fetchone()
+                if current is None:
+                    raise RuntimeError("device_missing_after_dispatch")
+                current_status = json.loads(current["status_json"] or "{}")
+                next_status = apply_command_to_status(
+                    device["type"],
+                    current_status,
+                    action,
+                    params,
+                )
+                conn.execute(
+                    "INSERT INTO device_log (device_id, action, detail, user_id) VALUES (?, ?, ?, ?)",
+                    (
+                        device_id,
+                        action,
+                        json.dumps(payload),
+                        int(user["sub"]) if user is not None else None,
+                    ),
+                )
+                conn.execute(
+                    "UPDATE devices SET status_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (json.dumps(next_status), device_id),
+                )
+                updated = conn.execute(
+                    "SELECT d.*, r.name as room_name FROM devices d JOIN rooms r ON d.room_id = r.id WHERE d.id = ?",
+                    (device_id,),
+                ).fetchone()
+        except Exception as exc:
+            raise CommandPostDispatchError(topic, action) from exc
+
+    return topic, updated
+
+
 def execute_device_command(
     device_id: int,
     action: str,
@@ -204,35 +276,18 @@ def execute_device_command(
             decoded_params,
         )
         payload = {**actual_params, "action": actual_action}
-        current_status = json.loads(device.get("status_json") or "{}")
-        next_status = apply_command_to_status(device["type"], current_status, actual_action, actual_params)
 
-    topic = device["mqtt_topic"] + "/command"
+    topic, updated = _dispatch_and_persist_command(
+        device,
+        actual_action,
+        actual_params,
+        payload,
+        user,
+    )
     try:
-        publish_message(topic, json.dumps(payload))
+        refresh_device_state(device_id)
     except Exception as exc:
-        raise HTTPException(status_code=502, detail="command_dispatch_failed") from exc
-
-    with get_db() as conn:
-        conn.execute(
-            "INSERT INTO device_log (device_id, action, detail, user_id) VALUES (?, ?, ?, ?)",
-            (
-                device_id,
-                actual_action,
-                json.dumps(payload),
-                int(user["sub"]) if user is not None else None,
-            ),
-        )
-        conn.execute(
-            "UPDATE devices SET status_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-            (json.dumps(next_status), device_id),
-        )
-        updated = conn.execute(
-            "SELECT d.*, r.name as room_name FROM devices d JOIN rooms r ON d.room_id = r.id WHERE d.id = ?",
-            (device_id,),
-        ).fetchone()
-
-    device_state_projection.update(device_id, next_status)
+        raise CommandPostDispatchError(topic, actual_action) from exc
 
     return {
         "device_id": device_id,

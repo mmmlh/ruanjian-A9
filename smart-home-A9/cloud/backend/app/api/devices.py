@@ -11,8 +11,22 @@ from app.api.auth import get_current_user
 from app.database.connection import get_db
 from app.services.device_command import execute_device_command
 from app.services.device_view import present_device
+from app.services.rule_engine import rule_engine
 
 router = APIRouter(prefix="/api/devices", tags=["设备管理"])
+
+
+def _reload_device_runtime_after_commit() -> None:
+    try:
+        rule_engine.reload_devices()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "device_runtime_reload_failed",
+                "committed": True,
+            },
+        ) from exc
 
 
 class DeviceUpdate(BaseModel):
@@ -106,6 +120,7 @@ def create_device(req: DeviceCreate, user: dict = Depends(get_current_user)):
                 raise HTTPException(status_code=409, detail="mqtt_topic_already_exists") from exc
             raise
         device_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    _reload_device_runtime_after_commit()
     return {"id": device_id, "room_id": req.room_id, "type": req.type, "name": req.name, "success": True}
 
 
@@ -122,4 +137,5 @@ def delete_device(device_id: int, user: dict = Depends(get_current_user)):
             if "FOREIGN KEY" in str(exc):
                 raise HTTPException(status_code=409, detail="device_has_history") from exc
             raise
+    _reload_device_runtime_after_commit()
     return {"success": True, "device_id": device_id}

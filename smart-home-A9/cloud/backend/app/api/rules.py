@@ -25,6 +25,21 @@ TRIGGER_FIELD_BY_DEVICE_TYPE = {
 }
 
 
+def _reload_rule_runtime_after_commit() -> None:
+    from app.services.rule_engine import rule_engine
+
+    try:
+        rule_engine.reload_rules()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "rule_runtime_reload_failed",
+                "committed": True,
+            },
+        ) from exc
+
+
 class RuleCreate(BaseModel):
     name: str
     condition_json: str
@@ -65,9 +80,7 @@ def create_rule(req: RuleCreate, user: dict = Depends(get_current_user)):
         )
         rule_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
 
-    from app.services.rule_engine import rule_engine
-
-    rule_engine.reload_rules()
+    _reload_rule_runtime_after_commit()
     return {"id": rule_id, "name": rule_name, "enabled": req.enabled}
 
 
@@ -160,9 +173,7 @@ def update_rule(rule_id: int, req: RuleUpdate, user: dict = Depends(get_current_
         values = list(updates.values()) + [rule_id]
         conn.execute(f"UPDATE automation_rules SET {set_clause} WHERE id = ?", values)
 
-    from app.services.rule_engine import rule_engine
-
-    rule_engine.reload_rules()
+    _reload_rule_runtime_after_commit()
     return {"id": rule_id, **updates}
 
 
@@ -175,9 +186,7 @@ def delete_rule(rule_id: int, user: dict = Depends(get_current_user)):
 
         conn.execute("DELETE FROM automation_rules WHERE id = ?", (rule_id,))
 
-    from app.services.rule_engine import rule_engine
-
-    rule_engine.reload_rules()
+    _reload_rule_runtime_after_commit()
     return {"message": "删除成功"}
 
 
@@ -191,7 +200,5 @@ def toggle_rule(rule_id: int, user: dict = Depends(get_current_user)):
         new_enabled = 0 if rule["enabled"] else 1
         conn.execute("UPDATE automation_rules SET enabled = ? WHERE id = ?", (new_enabled, rule_id))
 
-    from app.services.rule_engine import rule_engine
-
-    rule_engine.reload_rules()
+    _reload_rule_runtime_after_commit()
     return {"id": rule_id, "enabled": new_enabled}

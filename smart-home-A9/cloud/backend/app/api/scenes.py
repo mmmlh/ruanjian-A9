@@ -11,6 +11,7 @@ from app.api.auth import get_current_user
 from app.services import mqtt_client
 from app.services.activity_log import write_activity
 from app.services.device_command import (
+    CommandPostDispatchError,
     execute_device_command,
     normalize_and_validate_command,
 )
@@ -250,6 +251,15 @@ def execute_scene(scene_id: int, user: dict = Depends(get_current_user)):
             else:
                 payload = {**params, "action": action_name}
                 mqtt_client.publish_message(topic, json.dumps(payload))
+        except CommandPostDispatchError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail={
+                    "code": "scene_partial_failure",
+                    "executed": len(executed) + 1,
+                    "failed_index": index,
+                },
+            ) from exc
         except Exception as exc:
             raise HTTPException(
                 status_code=502,
