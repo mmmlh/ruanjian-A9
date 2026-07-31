@@ -118,3 +118,36 @@ def test_console_icon_buttons_are_named():
     for button in icon_buttons:
         assert "title=" in button
         assert "aria-label=" in button
+
+
+def test_nginx_serves_simulator_without_changing_existing_proxies():
+    nginx = (ROOT / "cloud" / "nginx" / "nginx.conf").read_text(
+        encoding="utf-8",
+    )
+
+    assert "include /etc/nginx/mime.types;" in nginx
+    assert "location = /simulator" in nginx
+    assert "return 301 /simulator/;" in nginx
+    assert "location /simulator/" in nginx
+    assert "try_files $uri $uri/ /simulator/index.html;" in nginx
+    assert len(re.findall(r"^\s*server \{$", nginx, re.MULTILINE)) == 2
+    assert re.search(r"^\s*location / \{$", nginx, re.MULTILINE)
+
+    for existing in [
+        "location /api/",
+        "location /ws/",
+        "location /docs",
+        "location /openapi.json",
+    ]:
+        assert existing in nginx
+
+
+def test_compose_mounts_only_public_simulator_assets_read_only():
+    compose = (ROOT / "cloud" / "docker-compose.yml").read_text(
+        encoding="utf-8",
+    )
+
+    assert (
+        "./simulator-ui/public:/usr/share/nginx/html/simulator:ro"
+        in compose
+    )
