@@ -429,6 +429,52 @@ class TestSceneCommandIntegration:
         assert stored["brightness"] == 72
         assert after_logs == before_logs + 1
 
+    def test_activity_log_failure_does_not_fail_completed_scene(
+        self,
+        client,
+        auth_headers,
+        monkeypatch,
+    ):
+        published = []
+        monkeypatch.setattr(
+            device_command_service,
+            "publish_message",
+            lambda topic, payload: published.append((topic, json.loads(payload))),
+        )
+        created = client.post(
+            "/api/scenes",
+            json={
+                "name": "Activity log failure",
+                "actions_json": json.dumps(
+                    [
+                        {
+                            "device_id": 4,
+                            "action": "on",
+                            "params": {"brightness": 72},
+                        }
+                    ]
+                ),
+            },
+            headers=auth_headers,
+        )
+        assert created.status_code == 200
+
+        def fail_activity_log(**kwargs):
+            raise RuntimeError("activity log unavailable")
+
+        monkeypatch.setattr(scenes_api, "write_activity", fail_activity_log)
+
+        response = client.post(
+            f"/api/scenes/{created.json()['id']}/execute",
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200
+        assert response.json()["executed"] == 1
+        assert published == [
+            ("home/livingroom/light/command", {"action": "on", "brightness": 72})
+        ]
+
     def test_unmapped_historical_scene_action_publishes_without_fake_state(
         self,
         client,

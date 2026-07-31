@@ -2,6 +2,7 @@
 场景管理 CRUD + 一键执行
 """
 import json
+import logging
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Any, Optional
@@ -17,6 +18,9 @@ from app.services.device_command import (
 )
 
 router = APIRouter(prefix="/api/scenes", tags=["场景管理"])
+
+
+logger = logging.getLogger(__name__)
 
 
 class SceneCreate(BaseModel):
@@ -271,12 +275,15 @@ def execute_scene(scene_id: int, user: dict = Depends(get_current_user)):
             ) from exc
         executed.append({"topic": topic, "action": action_name})
 
-    write_activity(
-        event_type="scene",
-        title=scene["name"],
-        detail=json.dumps({"executed": len(executed)}, ensure_ascii=False),
-        source="scenes.execute",
-        user_id=int(user["sub"]),
-    )
+    try:
+        write_activity(
+            event_type="scene",
+            title=scene["name"],
+            detail=json.dumps({"executed": len(executed)}, ensure_ascii=False),
+            source="scenes.execute",
+            user_id=int(user["sub"]),
+        )
+    except Exception:
+        logger.exception("scene activity log write failed after execution")
 
     return {"scene": scene["name"], "executed": len(executed), "actions": executed}
