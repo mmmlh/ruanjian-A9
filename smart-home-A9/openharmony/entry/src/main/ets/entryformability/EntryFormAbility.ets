@@ -6,7 +6,7 @@ import formProvider from '@ohos.app.form.formProvider'
 import hilog from '@ohos.hilog'
 import http from '@ohos.net.http'
 import { SERVER_BASE_URL } from '../common/ServerConfig'
-import { initPreferences } from '../common/SecureStorage'
+import { initPreferences, loadAuthData } from '../common/SecureStorage'
 import { formatUtcClock } from '../common/UtcTimeUtil'
 
 const TAG = 'SmartHomeForm'
@@ -64,10 +64,17 @@ async function resolveWidgetUrl(): Promise<string> {
 
 async function fetchDeviceData(): Promise<Record<string, Object>> {
   try {
+    let saved = await loadAuthData()
+    let headers: Record<string, string> = {
+      'Content-Type': 'application/json'
+    }
+    if (saved[0]) {
+      headers['Authorization'] = `Bearer ${saved[0]}`
+    }
     let httpRequest = http.createHttp()
     let response = await httpRequest.request(await resolveWidgetUrl(), {
       method: http.RequestMethod.GET,
-      header: { 'Content-Type': 'application/json' },
+      header: headers,
       connectTimeout: 5000,
       readTimeout: 5000
     })
