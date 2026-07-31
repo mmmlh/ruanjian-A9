@@ -9,6 +9,8 @@ from typing import Any
 from app.database.connection import get_db
 from app.services import mqtt_client
 from app.services.activity_log import write_activity
+from app.services.device_command import execute_device_command
+from app.services.device_state_projection import device_state_projection
 from app.services.rule_payloads import (
     RulePayloadError,
     parse_action_json,
@@ -18,12 +20,31 @@ from app.services.rule_payloads import (
 logger = logging.getLogger(__name__)
 
 
+def load_projection_states() -> dict[int, dict[str, Any]]:
+    with get_db() as conn:
+        devices = conn.execute("SELECT id, status_json FROM devices").fetchall()
+
+    states: dict[int, dict[str, Any]] = {}
+    for device in devices:
+        try:
+            status = json.loads(device["status_json"] or "{}")
+        except (json.JSONDecodeError, TypeError):
+            status = None
+        if not isinstance(status, dict):
+            logger.warning(
+                "invalid device status_json for projection: device_id=%s",
+                device["id"],
+            )
+            status = {}
+        states[device["id"]] = status
+    return states
+
+
 class RuleEngine:
     """In-memory rule engine singleton."""
 
     def __init__(self):
         self._rules: list[dict] = []
-        self._device_states: dict[int, dict] = {}
         self._device_id_map: dict[str, int] = {}
         self._lock = threading.Lock()
 
@@ -50,29 +71,29 @@ class RuleEngine:
                 continue
             compiled_rules.append(rule)
 
+        device_id_map: dict[str, int] = {}
+        for device in devices:
+            parts = device["mqtt_topic"].split("/")
+            if len(parts) >= 3:
+                key = f"{parts[1]}/{parts[2]}"
+                device_id_map[key] = device["id"]
+
         with self._lock:
             self._rules = compiled_rules
-            self._device_id_map.clear()
-            for device in devices:
-                parts = device["mqtt_topic"].split("/")
-                if len(parts) >= 3:
-                    key = f"{parts[1]}/{parts[2]}"
-                    self._device_id_map[key] = device["id"]
+            self._device_id_map = device_id_map
+            device_state_projection.rebuild(load_projection_states)
 
         logger.info(
             "rule engine loaded %s rules, %s device indexes, skipped=%s",
-            len(self._rules),
-            len(self._device_id_map),
+            len(compiled_rules),
+            len(device_id_map),
             skipped_rules,
         )
 
-    def update_device_state(self, device_id: int, state: dict):
-        with self._lock:
-            self._device_states[device_id] = state
-
     def _get_device_id(self, room_id: str, device_type: str) -> int | None:
         key = f"{room_id}/{device_type}"
-        return self._device_id_map.get(key)
+        with self._lock:
+            return self._device_id_map.get(key)
 
     def on_sensor_data(self, topic: str, payload: Any):
         if isinstance(payload, str):
@@ -86,10 +107,6 @@ class RuleEngine:
             return
         room_id = parts[1]
         sensor_type = parts[2]
-
-        device_id = self._get_device_id(room_id, sensor_type)
-        if device_id is not None:
-            self.update_device_state(device_id, payload)
 
         with self._lock:
             rules = list(self._rules)
@@ -167,8 +184,7 @@ class RuleEngine:
     def _find_device_state(self, device_type: str, room_id: str) -> dict | None:
         device_id = self._get_device_id(room_id, device_type)
         if device_id is not None:
-            with self._lock:
-                return self._device_states.get(device_id)
+            return device_state_projection.get(device_id)
         return None
 
     def _execute_actions(self, actions: list[dict], room_id: str):
@@ -180,6 +196,26 @@ class RuleEngine:
 
             if target_room == "same":
                 target_room = room_id
+
+            explicit_device_id = action.get("device_id")
+            if isinstance(explicit_device_id, int) and not isinstance(
+                explicit_device_id,
+                bool,
+            ):
+                device_id = explicit_device_id
+            else:
+                device_id = self._get_device_id(target_room, device_type)
+
+            if device_id is not None:
+                result = execute_device_command(
+                    device_id,
+                    action_name,
+                    params,
+                    user=None,
+                    expected_device_type=device_type,
+                )
+                logger.info("rule action: %s -> %s", result["topic"], result["payload"])
+                continue
 
             topic = f"home/{target_room}/{device_type}/command"
             payload = {"action": action_name}

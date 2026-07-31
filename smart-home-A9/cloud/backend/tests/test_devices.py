@@ -3,13 +3,16 @@ Device management API tests.
 """
 import json
 import sqlite3
+import threading
 from datetime import datetime
 from pathlib import Path
 
 import pytest
 
+import app.main as main_module
 import app.services.device_command as device_command_service
 from app.main import on_mqtt_message
+from app.services.rule_engine import rule_engine
 
 
 class TestDevices:
@@ -819,3 +822,220 @@ class TestDevices:
         assert stored["business_data"] == {"thresholds": [1, 2.5]}
         assert "online" not in stored
         assert "status_summary" not in stored
+
+
+class TestDeviceStateProjection:
+    def test_reload_rules_preloads_device_status_from_sqlite(self, client, db):
+        from app.services.device_state_projection import device_state_projection
+
+        db.execute(
+            "UPDATE devices SET status_json = ? WHERE id = 4",
+            ('{"power":"on","brightness":37}',),
+        )
+        db.commit()
+
+        rule_engine.reload_rules()
+
+        assert device_state_projection.get(4) == {"power": "on", "brightness": 37}
+
+    def test_reload_rules_replaces_invalid_device_status_with_empty_state(
+        self,
+        client,
+        db,
+        caplog,
+    ):
+        from app.services.device_state_projection import device_state_projection
+
+        db.execute("UPDATE devices SET status_json = ? WHERE id = 4", ("{bad",))
+        db.execute("UPDATE devices SET status_json = ? WHERE id = 5", ('["bad"]',))
+        db.commit()
+
+        rule_engine.reload_rules()
+
+        assert device_state_projection.get(4) == {}
+        assert device_state_projection.get(5) == {}
+        assert "invalid device status_json" in caplog.text
+
+    def test_device_command_updates_shared_projection(self, client, auth_headers):
+        from app.services.device_state_projection import device_state_projection
+
+        response = client.post(
+            "/api/devices/4/command",
+            json={"action": "on", "params": {"brightness": 63}},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200
+        assert device_state_projection.get(4)["power"] == "on"
+        assert device_state_projection.get(4)["brightness"] == 63
+
+    def test_state_write_updates_shared_projection(self, client, auth_headers):
+        from app.services.device_state_projection import device_state_projection
+
+        response = client.post(
+            "/api/states/light.device_4",
+            json={"state": "on", "attributes": {"brightness": 44}},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200
+        assert device_state_projection.get(4)["power"] == "on"
+        assert device_state_projection.get(4)["brightness"] == 44
+
+    def test_rebuild_holds_lock_until_loader_result_is_installed(self):
+        from app.services.device_state_projection import DeviceStateProjection
+
+        projection = DeviceStateProjection()
+        loader_started = threading.Event()
+        release_loader = threading.Event()
+        update_finished = threading.Event()
+
+        def loader():
+            loader_started.set()
+            assert release_loader.wait(timeout=1)
+            return {4: {"power": "off"}}
+
+        rebuild_thread = threading.Thread(target=projection.rebuild, args=(loader,))
+        rebuild_thread.start()
+        assert loader_started.wait(timeout=1)
+
+        def update():
+            projection.update(4, {"power": "on"})
+            update_finished.set()
+
+        update_thread = threading.Thread(target=update)
+        update_thread.start()
+        assert not update_finished.wait(timeout=0.05)
+
+        release_loader.set()
+        rebuild_thread.join(timeout=1)
+        update_thread.join(timeout=1)
+
+        assert not rebuild_thread.is_alive()
+        assert not update_thread.is_alive()
+        assert projection.get(4) == {"power": "on"}
+
+    def test_get_returns_a_copy(self):
+        from app.services.device_state_projection import DeviceStateProjection
+
+        projection = DeviceStateProjection()
+        original = {"power": "off"}
+        projection.update(4, original)
+
+        original["power"] = "on"
+        returned = projection.get(4)
+        returned["power"] = "on"
+
+        assert projection.get(4) == {"power": "off"}
+
+    def test_internal_encrypted_command_is_rejected_before_side_effects(
+        self,
+        client,
+        db,
+        monkeypatch,
+    ):
+        from fastapi import HTTPException
+
+        published = []
+        monkeypatch.setattr(
+            device_command_service,
+            "publish_message",
+            lambda topic, payload: published.append((topic, payload)),
+        )
+        before_status = db.execute(
+            "SELECT status_json FROM devices WHERE id = 4"
+        ).fetchone()["status_json"]
+        before_logs = db.execute(
+            "SELECT COUNT(*) FROM device_log WHERE device_id = 4"
+        ).fetchone()[0]
+
+        with pytest.raises(HTTPException) as exc_info:
+            device_command_service.execute_device_command(
+                4,
+                "on",
+                {"encrypted": "opaque"},
+                None,
+            )
+
+        assert exc_info.value.status_code == 400
+        assert published == []
+        assert db.execute(
+            "SELECT status_json FROM devices WHERE id = 4"
+        ).fetchone()["status_json"] == before_status
+        assert db.execute(
+            "SELECT COUNT(*) FROM device_log WHERE device_id = 4"
+        ).fetchone()[0] == before_logs
+
+    def test_mqtt_sync_updates_projection_before_rule_evaluation(
+        self,
+        client,
+        monkeypatch,
+    ):
+        from app.database.connection import get_db
+        from app.services.device_state_projection import device_state_projection
+
+        observed = {}
+
+        def observe_rule_input(topic, payload):
+            with get_db() as conn:
+                stored = conn.execute(
+                    "SELECT status_json FROM devices WHERE id = 1"
+                ).fetchone()["status_json"]
+            observed["stored"] = json.loads(stored)
+            observed["projected"] = device_state_projection.get(1)
+
+        monkeypatch.setattr(main_module.rule_engine, "on_sensor_data", observe_rule_input)
+        monkeypatch.setattr(main_module, "_main_event_loop", None)
+
+        on_mqtt_message(
+            "home/livingroom/temperature_sensor/sensor",
+            {"value": 29.5, "unit": "celsius", "ts": 7},
+        )
+
+        expected = {"value": 29.5, "unit": "celsius", "ts": 7}
+        assert observed == {"stored": expected, "projected": expected}
+
+    def test_non_mapping_mqtt_payload_stops_before_business_processing(
+        self,
+        client,
+        monkeypatch,
+        caplog,
+    ):
+        calls = []
+
+        class RunningLoop:
+            @staticmethod
+            def is_running():
+                return True
+
+        monkeypatch.setattr(
+            main_module.rule_engine,
+            "on_sensor_data",
+            lambda topic, payload: calls.append("rule"),
+        )
+        monkeypatch.setattr(
+            main_module,
+            "_persist_sensor_data",
+            lambda topic, payload: calls.append("persist"),
+        )
+        monkeypatch.setattr(
+            main_module,
+            "_sync_device_status",
+            lambda topic, payload: calls.append("sync"),
+        )
+        monkeypatch.setattr(
+            main_module,
+            "broadcast_ws",
+            lambda message: calls.append("broadcast"),
+        )
+        monkeypatch.setattr(main_module, "_main_event_loop", RunningLoop())
+        monkeypatch.setattr(
+            main_module.asyncio,
+            "run_coroutine_threadsafe",
+            lambda coroutine, loop: calls.append("websocket"),
+        )
+
+        on_mqtt_message("home/livingroom/light/status", ["invalid"])
+
+        assert calls == []
+        assert "non-mapping MQTT payload" in caplog.text

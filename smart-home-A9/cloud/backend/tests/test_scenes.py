@@ -4,9 +4,11 @@
 import json
 
 import pytest
+from fastapi import HTTPException
 
 from app.api import scenes as scenes_api
 from app.database import init_db
+import app.services.device_command as device_command_service
 
 
 SCENE_ACTIONS = (
@@ -209,7 +211,7 @@ class TestScenes:
         actions_json = '[{"device_type":"light","action":"on","params":{}}]'
         published = []
         monkeypatch.setattr(
-            scenes_api.mqtt_client,
+            device_command_service,
             "publish_message",
             lambda topic, payload: published.append((topic, json.loads(payload))),
         )
@@ -245,7 +247,7 @@ class TestScenes:
         actions_json = json.dumps(actions, separators=(",", ":"))
         published = []
         monkeypatch.setattr(
-            scenes_api.mqtt_client,
+            device_command_service,
             "publish_message",
             lambda topic, payload: published.append((topic, json.loads(payload))),
         )
@@ -291,7 +293,7 @@ class TestScenes:
         )
         published = []
         monkeypatch.setattr(
-            scenes_api.mqtt_client,
+            device_command_service,
             "publish_message",
             lambda topic, payload: published.append((topic, json.loads(payload))),
         )
@@ -364,6 +366,216 @@ class TestScenes:
             lambda topic, payload: published.append((topic, payload)),
         )
         db.execute("UPDATE scenes SET actions_json = ? WHERE id = 1", ("123",))
+        db.commit()
+
+        response = client.post("/api/scenes/1/execute", headers=auth_headers)
+
+        assert response.status_code == 409
+        assert response.json()["detail"] == "invalid_scene_actions"
+        assert published == []
+
+
+class TestSceneCommandIntegration:
+    def test_resolvable_scene_action_updates_status_and_device_log(
+        self,
+        client,
+        auth_headers,
+        db,
+        monkeypatch,
+    ):
+        published = []
+        monkeypatch.setattr(
+            device_command_service,
+            "publish_message",
+            lambda topic, payload: published.append((topic, json.loads(payload))),
+        )
+        actions_json = json.dumps(
+            [
+                {
+                    "device_type": "light",
+                    "room_id": "livingroom",
+                    "action": "on",
+                    "params": {"brightness": 72},
+                }
+            ]
+        )
+        created = client.post(
+            "/api/scenes",
+            json={"name": "Command-backed scene", "actions_json": actions_json},
+            headers=auth_headers,
+        )
+        before_logs = db.execute(
+            "SELECT COUNT(*) FROM device_log WHERE device_id = 4"
+        ).fetchone()[0]
+
+        response = client.post(
+            f"/api/scenes/{created.json()['id']}/execute",
+            headers=auth_headers,
+        )
+
+        stored = json.loads(
+            db.execute("SELECT status_json FROM devices WHERE id = 4").fetchone()[
+                "status_json"
+            ]
+        )
+        after_logs = db.execute(
+            "SELECT COUNT(*) FROM device_log WHERE device_id = 4"
+        ).fetchone()[0]
+        assert response.status_code == 200
+        assert published == [
+            ("home/livingroom/light/command", {"action": "on", "brightness": 72})
+        ]
+        assert stored["power"] == "on"
+        assert stored["brightness"] == 72
+        assert after_logs == before_logs + 1
+
+    def test_unmapped_historical_scene_action_publishes_without_fake_state(
+        self,
+        client,
+        auth_headers,
+        db,
+        monkeypatch,
+    ):
+        published = []
+        monkeypatch.setattr(
+            scenes_api.mqtt_client,
+            "publish_message",
+            lambda topic, payload: published.append((topic, json.loads(payload))),
+        )
+        monkeypatch.setattr(
+            device_command_service,
+            "publish_message",
+            lambda topic, payload: pytest.fail("unmapped target used command service"),
+        )
+        actions_json = json.dumps(
+            [
+                {
+                    "device_type": "light",
+                    "room_id": "garage",
+                    "action": "on",
+                    "params": {"brightness": 25},
+                }
+            ]
+        )
+        created = client.post(
+            "/api/scenes",
+            json={"name": "Historical garage", "actions_json": actions_json},
+            headers=auth_headers,
+        )
+        before_statuses = db.execute(
+            "SELECT id, status_json FROM devices ORDER BY id"
+        ).fetchall()
+        before_logs = db.execute("SELECT COUNT(*) FROM device_log").fetchone()[0]
+
+        response = client.post(
+            f"/api/scenes/{created.json()['id']}/execute",
+            headers=auth_headers,
+        )
+
+        after_statuses = db.execute(
+            "SELECT id, status_json FROM devices ORDER BY id"
+        ).fetchall()
+        after_logs = db.execute("SELECT COUNT(*) FROM device_log").fetchone()[0]
+        assert response.status_code == 200
+        assert published == [
+            ("home/garage/light/command", {"action": "on", "brightness": 25})
+        ]
+        assert [tuple(row) for row in after_statuses] == [
+            tuple(row) for row in before_statuses
+        ]
+        assert after_logs == before_logs
+
+    def test_second_scene_dispatch_failure_reports_partial_progress(
+        self,
+        client,
+        auth_headers,
+        db,
+        monkeypatch,
+    ):
+        calls = []
+
+        def publish(topic, payload):
+            calls.append((topic, json.loads(payload)))
+            if len(calls) == 2:
+                raise HTTPException(status_code=502, detail="mqtt offline")
+
+        monkeypatch.setattr(device_command_service, "publish_message", publish)
+        monkeypatch.setattr(scenes_api.mqtt_client, "publish_message", publish)
+        actions_json = json.dumps(
+            [
+                {"device_id": 4, "action": "on", "params": {"brightness": 31}},
+                {"device_id": 5, "action": "on", "params": {}},
+            ]
+        )
+        created = client.post(
+            "/api/scenes",
+            json={"name": "Partial scene", "actions_json": actions_json},
+            headers=auth_headers,
+        )
+
+        response = client.post(
+            f"/api/scenes/{created.json()['id']}/execute",
+            headers=auth_headers,
+        )
+
+        light_status = json.loads(
+            db.execute("SELECT status_json FROM devices WHERE id = 4").fetchone()[
+                "status_json"
+            ]
+        )
+        assert response.status_code == 502
+        assert response.json()["detail"] == {
+            "code": "scene_partial_failure",
+            "executed": 1,
+            "failed_index": 1,
+        }
+        assert light_status["power"] == "on"
+        assert db.execute(
+            "SELECT COUNT(*) FROM device_log WHERE device_id = 4"
+        ).fetchone()[0] == 1
+        assert db.execute(
+            "SELECT COUNT(*) FROM device_log WHERE device_id = 5"
+        ).fetchone()[0] == 0
+
+    def test_scene_prevalidates_all_actions_before_first_publish(
+        self,
+        client,
+        auth_headers,
+        db,
+        monkeypatch,
+    ):
+        published = []
+        monkeypatch.setattr(
+            scenes_api.mqtt_client,
+            "publish_message",
+            lambda topic, payload: published.append((topic, payload)),
+        )
+        monkeypatch.setattr(
+            device_command_service,
+            "publish_message",
+            lambda topic, payload: published.append((topic, payload)),
+        )
+        db.execute(
+            "UPDATE scenes SET actions_json = ? WHERE id = 1",
+            (
+                json.dumps(
+                    [
+                        {
+                            "device_type": "light",
+                            "room_id": "livingroom",
+                            "action": "on",
+                            "params": {},
+                        },
+                        {
+                            "device_type": "light",
+                            "room_id": "bedroom",
+                            "action": "destroy",
+                            "params": {},
+                        },
+                    ]
+                ),
+            ),
+        )
         db.commit()
 
         response = client.post("/api/scenes/1/execute", headers=auth_headers)

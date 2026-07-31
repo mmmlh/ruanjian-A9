@@ -25,6 +25,7 @@ from app.api import (
 )
 from app.config import CORS_ORIGINS, DEBUG, HOST, PORT
 from app.database import init_db
+from app.services.device_state_projection import device_state_projection
 from app.services.mqtt_client import init_mqtt, stop_mqtt, subscribe
 from app.services.rule_engine import rule_engine
 
@@ -50,14 +51,21 @@ async def broadcast_ws(message: dict):
 
 def on_mqtt_message(topic: str, payload):
     """Handle MQTT messages from simulators and devices."""
+    if not isinstance(payload, dict):
+        logger.warning("ignored non-mapping MQTT payload on topic %s", topic)
+        return
+
+    _persist_sensor_data(topic, payload)
+    synced = _sync_device_status(topic, payload)
+    if synced is not None:
+        device_id, status = synced
+        device_state_projection.update(device_id, status)
+
     rule_engine.on_sensor_data(topic, payload)
 
     msg = {"type": "mqtt", "topic": topic, "payload": payload}
     if _main_event_loop and _main_event_loop.is_running():
         asyncio.run_coroutine_threadsafe(broadcast_ws(msg), _main_event_loop)
-
-    _persist_sensor_data(topic, payload)
-    _sync_device_status(topic, payload)
 
 
 def _persist_sensor_data(topic: str, payload):
@@ -115,7 +123,7 @@ def _persist_sensor_data(topic: str, payload):
         logger.error("sensor data persistence failed: %s", exc)
 
 
-def _sync_device_status(topic: str, payload):
+def _sync_device_status(topic: str, payload) -> tuple[int, dict] | None:
     """Persist device state from `.../status`, `.../response`, and `.../sensor` topics."""
     if isinstance(payload, str):
         try:
@@ -148,6 +156,7 @@ def _sync_device_status(topic: str, payload):
     try:
         from app.database.connection import get_db
 
+        synced: tuple[int, dict] | None = None
         with get_db() as conn:
             device = conn.execute(
                 "SELECT id FROM devices WHERE mqtt_topic = ?",
@@ -158,8 +167,11 @@ def _sync_device_status(topic: str, payload):
                     "UPDATE devices SET status_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                     (json.dumps(status), device["id"]),
                 )
+                synced = (device["id"], status)
+        return synced
     except Exception as exc:
         logger.error("device status sync failed: %s", exc)
+        return None
 
 
 @asynccontextmanager

@@ -14,6 +14,7 @@ from app.services.device_command import (
     PARAMETER_RANGES_BY_DEVICE_TYPE,
     execute_entity_command,
 )
+from app.services.device_state_projection import device_state_projection
 from app.services.entity_state import META_ATTRIBUTE_KEYS, build_state, parse_entity_id
 
 router = APIRouter(prefix="/api/states", tags=["设备状态"])
@@ -144,6 +145,7 @@ def set_state(entity_id: str, req: StateUpdateRequest, user: dict = Depends(get_
             (device_id,),
         ).fetchone()
 
+    device_state_projection.update(device_id, status)
     return build_state(dict(updated)) if updated else None
 
 

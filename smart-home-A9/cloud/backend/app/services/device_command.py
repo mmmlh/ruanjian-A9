@@ -4,6 +4,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from app.database.connection import get_db
+from app.services.device_state_projection import device_state_projection
 from app.services.entity_state import build_state, parse_entity_id
 from app.services.mqtt_client import publish_message
 from app.services.security import aes_decrypt
@@ -80,8 +81,10 @@ def normalize_and_validate_command(
     return canonical_action, normalized_params
 
 
-def decode_command_payload(action: str, params: Any, user: dict) -> tuple[str, Any]:
+def decode_command_payload(action: str, params: Any, user: dict | None) -> tuple[str, Any]:
     if isinstance(params, dict) and "encrypted" in params:
+        if user is None:
+            raise HTTPException(status_code=400, detail="encrypted_command_requires_user")
         aes_key = user.get("aes_key", "")
         if not aes_key:
             raise HTTPException(status_code=400, detail="密钥未配置")
@@ -179,7 +182,7 @@ def execute_device_command(
     device_id: int,
     action: str,
     params: dict[str, Any] | None,
-    user: dict,
+    user: dict | None,
     expected_device_type: str | None = None,
 ) -> dict[str, Any]:
     with get_db() as conn:
@@ -213,7 +216,12 @@ def execute_device_command(
     with get_db() as conn:
         conn.execute(
             "INSERT INTO device_log (device_id, action, detail, user_id) VALUES (?, ?, ?, ?)",
-            (device_id, actual_action, json.dumps(payload), int(user["sub"])),
+            (
+                device_id,
+                actual_action,
+                json.dumps(payload),
+                int(user["sub"]) if user is not None else None,
+            ),
         )
         conn.execute(
             "UPDATE devices SET status_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -223,6 +231,8 @@ def execute_device_command(
             "SELECT d.*, r.name as room_name FROM devices d JOIN rooms r ON d.room_id = r.id WHERE d.id = ?",
             (device_id,),
         ).fetchone()
+
+    device_state_projection.update(device_id, next_status)
 
     return {
         "device_id": device_id,

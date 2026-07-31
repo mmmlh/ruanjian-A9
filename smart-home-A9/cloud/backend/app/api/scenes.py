@@ -10,7 +10,10 @@ from app.database.connection import get_db
 from app.api.auth import get_current_user
 from app.services import mqtt_client
 from app.services.activity_log import write_activity
-from app.services.device_command import normalize_and_validate_command
+from app.services.device_command import (
+    execute_device_command,
+    normalize_and_validate_command,
+)
 
 router = APIRouter(prefix="/api/scenes", tags=["场景管理"])
 
@@ -29,7 +32,10 @@ class SceneUpdate(BaseModel):
     actions_json: Optional[str] = None
 
 
-def parse_scene_actions(raw: str, status_code: int = 400) -> list[dict[str, Any]]:
+def _parse_scene_action_structures(
+    raw: str,
+    status_code: int,
+) -> list[dict[str, Any]]:
     try:
         actions = json.loads(raw)
     except (json.JSONDecodeError, TypeError) as exc:
@@ -70,41 +76,65 @@ def parse_scene_actions(raw: str, status_code: int = 400) -> list[dict[str, Any]
         if "room_id" in action and (not isinstance(room_id, str) or not room_id.strip()):
             raise HTTPException(status_code=status_code, detail="invalid_scene_actions")
 
-        mqtt_topic = None
+        parsed_action = dict(action)
+        parsed_action.pop("_mqtt_topic", None)
         if has_device_type:
-            validated_device_type = device_type.strip()
-        else:
-            with get_db() as conn:
-                device = conn.execute(
-                    "SELECT type, mqtt_topic FROM devices WHERE id = ?",
-                    (device_id,),
-                ).fetchone()
+            parsed_action["device_type"] = device_type.strip()
+        if "room_id" in action:
+            parsed_action["room_id"] = room_id.strip()
+        parsed_actions.append(parsed_action)
+
+    return parsed_actions
+
+
+def _load_scene_devices() -> list[dict[str, Any]]:
+    with get_db() as conn:
+        rows = conn.execute("SELECT id, type, mqtt_topic FROM devices").fetchall()
+    return [dict(row) for row in rows]
+
+
+def _normalize_scene_actions(
+    actions: list[dict[str, Any]],
+    devices_by_id: dict[int, dict[str, Any]],
+    status_code: int,
+) -> list[dict[str, Any]]:
+    normalized_actions: list[dict[str, Any]] = []
+    for action in actions:
+        device_id = action.get("device_id")
+        if device_id is not None:
+            device = devices_by_id.get(device_id)
             if device is None:
                 raise HTTPException(status_code=status_code, detail="invalid_scene_actions")
-            validated_device_type = device["type"]
-            mqtt_topic = f"{device['mqtt_topic']}/command"
+            device_type = device["type"]
+        else:
+            device_type = action["device_type"]
 
         try:
             canonical_action, normalized_params = normalize_and_validate_command(
-                validated_device_type,
-                action_name,
-                params,
+                device_type,
+                action["action"],
+                action.get("params", {}),
             )
         except HTTPException as exc:
             raise HTTPException(status_code=status_code, detail="invalid_scene_actions") from exc
 
-        parsed_action = dict(action)
-        parsed_action.pop("_mqtt_topic", None)
-        parsed_action["device_type"] = validated_device_type
-        parsed_action["action"] = canonical_action
-        parsed_action["params"] = normalized_params
-        if "room_id" in action:
-            parsed_action["room_id"] = room_id.strip()
-        if mqtt_topic is not None:
-            parsed_action["_mqtt_topic"] = mqtt_topic
-        parsed_actions.append(parsed_action)
+        normalized_action = dict(action)
+        normalized_action["device_type"] = device_type
+        normalized_action["action"] = canonical_action
+        normalized_action["params"] = normalized_params
+        normalized_actions.append(normalized_action)
+    return normalized_actions
 
-    return parsed_actions
+
+def parse_scene_actions(raw: str, status_code: int = 400) -> list[dict[str, Any]]:
+    actions = _parse_scene_action_structures(raw, status_code)
+    devices_by_id: dict[int, dict[str, Any]] = {}
+    if any("device_id" in action for action in actions):
+        devices_by_id = {
+            device["id"]: device
+            for device in _load_scene_devices()
+        }
+    return _normalize_scene_actions(actions, devices_by_id, status_code)
 
 
 @router.get("")
@@ -182,21 +212,53 @@ def execute_scene(scene_id: int, user: dict = Depends(get_current_user)):
         if scene is None:
             raise HTTPException(status_code=404, detail="场景不存在")
 
-    actions = parse_scene_actions(scene["actions_json"], status_code=409)
+    parsed_actions = _parse_scene_action_structures(
+        scene["actions_json"],
+        status_code=409,
+    )
+    devices = _load_scene_devices()
+    devices_by_id = {device["id"]: device for device in devices}
+    devices_by_topic = {device["mqtt_topic"]: device for device in devices}
+    actions = _normalize_scene_actions(parsed_actions, devices_by_id, status_code=409)
+
+    targets: list[tuple[dict[str, Any], dict[str, Any] | None, str]] = []
+    for action in actions:
+        if "device_id" in action:
+            device = devices_by_id[action["device_id"]]
+            mqtt_topic = device["mqtt_topic"]
+        else:
+            target_room = action.get("room_id", "livingroom")
+            mqtt_topic = f"home/{target_room}/{action['device_type']}"
+            device = devices_by_topic.get(mqtt_topic)
+        targets.append((action, device, f"{mqtt_topic}/command"))
 
     executed = []
-    for action in actions:
-        device_type = action.get("device_type")
-        target_room = action.get("room_id", "livingroom")
-        action_name = action.get("action")
-        params = action.get("params", {})
-
-        topic = action.get("_mqtt_topic") or f"home/{target_room}/{device_type}/command"
-        payload = {"action": action_name}
-        payload.update(params)
-        payload["action"] = action_name
-
-        mqtt_client.publish_message(topic, json.dumps(payload))
+    for index, (action, device, topic) in enumerate(targets):
+        action_name = action["action"]
+        params = action["params"]
+        try:
+            if device is not None:
+                result = execute_device_command(
+                    device["id"],
+                    action_name,
+                    params,
+                    user,
+                    expected_device_type=action["device_type"],
+                )
+                topic = result["topic"]
+                action_name = result["action"]
+            else:
+                payload = {**params, "action": action_name}
+                mqtt_client.publish_message(topic, json.dumps(payload))
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail={
+                    "code": "scene_partial_failure",
+                    "executed": len(executed),
+                    "failed_index": index,
+                },
+            ) from exc
         executed.append({"topic": topic, "action": action_name})
 
     write_activity(
