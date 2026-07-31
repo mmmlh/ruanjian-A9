@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#14211d">
+  <title>设备模拟器控制台</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand-mark" aria-hidden="true">A9</div>
+    <div class="brand-copy">
+      <h1>设备模拟器控制台</h1>
+      <p>Smart Home A9 · MQTT 本地设备层</p>
+    </div>
+    <div class="broker-state" id="brokerState">
+      <span class="status-dot"></span>
+      <span>正在连接</span>
+    </div>
+  </header>
+
+  <section class="overview" aria-label="运行概览">
+    <div class="metric"><strong id="deviceCount">0</strong><span>设备总数</span></div>
+    <div class="metric"><strong id="runningCount">0</strong><span>运行中</span></div>
+    <div class="metric"><strong id="connectedCount">0</strong><span>MQTT 在线</span></div>
+    <div class="metric"><strong id="roomCount">0</strong><span>房间</span></div>
+  </section>
+
+  <main>
+    <div class="toolbar">
+      <label class="search-field">
+        <span class="sr-only">搜索设备</span>
+        <span aria-hidden="true">⌕</span>
+        <input id="searchInput" type="search" placeholder="搜索房间、类型或主题">
+      </label>
+      <select id="roomFilter" aria-label="按房间筛选">
+        <option value="">全部房间</option>
+      </select>
+      <select id="typeFilter" aria-label="按设备类型筛选">
+        <option value="">全部类型</option>
+      </select>
+      <select id="stateFilter" aria-label="按运行状态筛选">
+        <option value="">全部状态</option>
+        <option value="connected">MQTT 在线</option>
+        <option value="running">运行中</option>
+        <option value="stopped">已停止</option>
+      </select>
+      <button class="button primary" id="addButton" type="button">添加模拟设备</button>
+    </div>
+
+    <div class="result-bar">
+      <h2>设备列表</h2>
+      <span id="resultCount">0 台设备</span>
+      <button class="icon-button" id="refreshButton" type="button" title="立即刷新" aria-label="立即刷新">↻</button>
+    </div>
+
+    <section class="device-grid" id="deviceGrid" aria-live="polite"></section>
+    <div class="empty-state" id="emptyState" hidden>
+      <strong>没有匹配的模拟设备</strong>
+      <span>调整筛选条件后重试</span>
+    </div>
+  </main>
+
+  <dialog id="addDialog">
+    <form id="addForm" method="dialog">
+      <div class="dialog-header">
+        <div>
+          <h2>添加模拟设备</h2>
+          <p>设备将接入当前 MQTT Broker</p>
+        </div>
+        <button class="icon-button" type="button" id="closeDialogButton" title="关闭" aria-label="关闭">×</button>
+      </div>
+      <div class="form-grid">
+        <label>
+          <span>设备类型</span>
+          <select name="type" id="addType" required></select>
+        </label>
+        <label>
+          <span>房间 ID</span>
+          <input name="room" id="addRoom" list="roomOptions" pattern="[a-z0-9][a-z0-9_-]{0,31}" placeholder="例如 kitchen" required>
+          <datalist id="roomOptions"></datalist>
+        </label>
+        <label>
+          <span>设备 ID</span>
+          <input name="id" type="number" min="1" placeholder="自动分配">
+        </label>
+        <label id="brandField" hidden>
+          <span>空调品牌</span>
+          <select name="brand">
+            <option value="gree">格力</option>
+            <option value="haier">海尔</option>
+            <option value="midea">美的</option>
+            <option value="generic">通用</option>
+          </select>
+        </label>
+      </div>
+      <div class="topic-preview">
+        <span>MQTT 主题</span>
+        <code id="topicPreview">home/room/device</code>
+      </div>
+      <div class="dialog-actions">
+        <button class="button secondary" type="button" id="cancelDialogButton">取消</button>
+        <button class="button primary" type="submit">添加并启动</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast-region" id="toastRegion" aria-live="polite"></div>
+  <script src="/app.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,107 @@
+[
+  {
+    "id": 1,
+    "room": "livingroom",
+    "type": "temperature_sensor",
+    "enabled": true
+  },
+  {
+    "id": 2,
+    "room": "livingroom",
+    "type": "humidity_sensor",
+    "enabled": true
+  },
+  {
+    "id": 3,
+    "room": "livingroom",
+    "type": "pir_sensor",
+    "enabled": true
+  },
+  {
+    "id": 4,
+    "room": "livingroom",
+    "type": "light",
+    "enabled": true
+  },
+  {
+    "id": 5,
+    "room": "livingroom",
+    "type": "ac",
+    "enabled": true,
+    "brand": "gree"
+  },
+  {
+    "id": 6,
+    "room": "livingroom",
+    "type": "door_lock",
+    "enabled": true
+  },
+  {
+    "id": 7,
+    "room": "bedroom",
+    "type": "temperature_sensor",
+    "enabled": true
+  },
+  {
+    "id": 8,
+    "room": "bedroom",
+    "type": "humidity_sensor",
+    "enabled": true
+  },
+  {
+    "id": 9,
+    "room": "bedroom",
+    "type": "pir_sensor",
+    "enabled": true
+  },
+  {
+    "id": 10,
+    "room": "bedroom",
+    "type": "light",
+    "enabled": true
+  },
+  {
+    "id": 11,
+    "room": "bedroom",
+    "type": "ac",
+    "enabled": true,
+    "brand": "haier"
+  },
+  {
+    "id": 12,
+    "room": "study",
+    "type": "temperature_sensor",
+    "enabled": true
+  },
+  {
+    "id": 13,
+    "room": "study",
+    "type": "light",
+    "enabled": true
+  },
+  {
+    "id": 14,
+    "room": "study",
+    "type": "ac",
+    "enabled": true,
+    "brand": "midea"
+  },
+  {
+    "id": 15,
+    "room": "livingroom",
+    "type": "curtain",
+    "enabled": true
+  },
+  {
+    "id": 16,
+    "room": "study",
+    "type": "curtain",
+    "enabled": true
+  },
+  {
+    "id": 17,
+    "room": "bedroom",
+    "type": "humidifier",
+    "enabled": true
+  }
+]

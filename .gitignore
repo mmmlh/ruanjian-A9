@@ -18,3 +18,15 @@ hs_err_pid*.log
 # OS metadata
 .DS_Store
 Thumbs.db
+
+# Cloud runtime state and local credentials
+cloud/data/
+cloud/backend/data/
+cloud/mosquitto/data/
+cloud/mosquitto/certs/*
+!cloud/mosquitto/certs/.gitkeep
+cloud/nginx/certs/*
+!cloud/nginx/certs/.gitkeep
+cloud/**/__pycache__/
+cloud/**/.pytest_cache/
+cloud/**/*.pyc

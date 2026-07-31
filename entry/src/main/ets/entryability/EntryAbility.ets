@@ -22,7 +22,7 @@ export default class EntryAbility extends UIAbility {
   onWindowStageCreate(windowStage: window.WindowStage): void {
     hilog.info(0x0000, 'SmartHome', 'Ability onWindowStageCreate')
     windowStage.loadContent('pages/LoginPage', (err) => {
-      if (err.code) {
+      if (err && err.code) {
         hilog.error(0x0000, 'SmartHome', 'Failed to load content: %{public}s', JSON.stringify(err))
         return
       }

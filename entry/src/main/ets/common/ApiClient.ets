@@ -1,7 +1,8 @@
 import http from '@ohos.net.http'
 import { extractAesKey } from './TokenUtil'
 import { aesEncrypt } from './CryptoUtil'
-import { DEFAULT_SERVER_URL, loadServerUrl, saveServerUrl, saveAuthData, loadAuthData, clearAuthData } from './SecureStorage'
+import { DEFAULT_SERVER_URL } from './ServerConfig'
+import { loadServerUrl, saveServerUrl, saveAuthData, loadAuthData, clearAuthData } from './SecureStorage'
 import { UiText } from './UiText'
 import {
   Room,

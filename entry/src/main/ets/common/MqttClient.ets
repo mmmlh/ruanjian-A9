@@ -1,6 +1,7 @@
 import { BusinessError } from '@ohos.base'
 import webSocket from '@ohos.net.webSocket'
 import { getBaseUrl, getToken } from './ApiClient'
+import { WEBSOCKET_REALTIME_PATH } from './ServerConfig'
 
 const RECONNECT_DELAYS: number[] = [2000, 5000, 10000, 20000, 30000]
 
@@ -40,7 +41,7 @@ function doConnect(): void {
   let base = getBaseUrl()
   let wsProtocol = base.startsWith('https') ? 'wss://' : 'ws://'
   let host = base.replace('https://', '').replace('http://', '')
-  let url = `${wsProtocol}${host}/ws/realtime?token=${token}`
+  let url = `${wsProtocol}${host}${WEBSOCKET_REALTIME_PATH}?token=${token}`
   let socket = webSocket.createWebSocket()
   ws = socket
 
@@ -59,7 +60,7 @@ function doConnect(): void {
   })
 
   socket.on('message', (err: BusinessError, data: string | ArrayBuffer) => {
-    if (manualClose || generation !== connectionGeneration || err.code) {
+    if (manualClose || generation !== connectionGeneration || (err && err.code)) {
       return
     }
     if (typeof data === 'string' && messageCallback) {

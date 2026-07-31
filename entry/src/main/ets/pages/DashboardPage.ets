@@ -461,6 +461,27 @@ struct DashboardPage {
       return
     }
 
+    let topicParts = topic.split('/')
+    if (topicParts.length >= 4 && topicParts[3] === 'availability') {
+      let onlineValue = payload['online']
+      if (typeof onlineValue !== 'boolean') {
+        return
+      }
+      for (let i = 0; i < this.devices.length; i++) {
+        let device = this.devices[i]
+        if (device.mqtt_topic !== deviceTopic) {
+          continue
+        }
+        device.online = onlineValue as boolean
+        let now = new Date().toISOString()
+        device.updated_at = now
+        device.last_seen_at = now
+        this.recountOnline()
+        return
+      }
+      return
+    }
+
     let mergedPayload = this.normalizeRealtimePayload(topic, payload)
     if (mergedPayload === null) {
       return

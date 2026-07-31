@@ -1,6 +1,5 @@
 import dataPreferences from '@ohos.data.preferences'
 
-export const DEFAULT_SERVER_URL = 'http://8.162.10.179:8000'
 const PREFS_NAME = 'smart_home_auth'
 const KEY_TOKEN = 'auth_token'
 const KEY_AES_KEY = 'aes_key'

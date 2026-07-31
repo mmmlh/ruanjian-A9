@@ -571,7 +571,7 @@ erDiagram
 
 ### 通用约定
 
-- 基础地址默认是 `http://8.162.10.179:8000`。
+- 基础地址由 `entry/src/main/ets/common/ServerConfig.ets` 统一配置，当前模拟器默认是 `http://10.0.2.2:8000`。
 - 请求和响应均使用 JSON。
 - 已登录请求使用 `Authorization: Bearer <token>`。
 - 连接超时和读取超时均为 10 秒；卡片请求为 5 秒。
@@ -689,12 +689,12 @@ WebSocket 消息：
 | 主模块 | `build-profile.json5` | `entry` |
 | 默认页面 | `EntryAbility.ets` | `pages/LoginPage` |
 | 网络权限 | `entry/src/main/module.json5` | `ohos.permission.INTERNET` |
-| 默认服务器 | `SecureStorage.ets` | `http://8.162.10.179:8000` |
+| 默认服务器 | `ServerConfig.ets` | `http://10.0.2.2:8000`（模拟器访问宿主机） |
 | 本地偏好文件 | `SecureStorage.ets` | `smart_home_auth` |
 | WebSocket 重连 | `MqttClient.ets` | 2、5、10、20、30 秒有界退避 |
 | 卡片刷新 | `form_config.json` / Form Ability | 系统计划、可见性通知和手动刷新 |
 
-`setBaseUrl()` 可以保存服务器地址，但当前页面没有调用它。因此源码中的默认地址实际上是普通用户唯一可用的服务器地址；`screenshots/` 中出现的“服务器配置”入口属于历史界面，当前页面代码中不存在。
+切换编译时默认服务器时，编辑 `ServerConfig.ets` 中的服务器地址，并让 `DEFAULT_SERVER_URL` 指向所需地址。模拟器中的 `localhost` 指向模拟器自身，访问宿主机通常应改用 `EMULATOR_SERVER_URL`（`http://10.0.2.2:8000`）；若模拟器网络映射不同，请替换为实际宿主机网关地址。`setBaseUrl()` 保存的运行时地址会优先于该默认值，但当前页面没有调用它；`screenshots/` 中出现的“服务器配置”入口属于历史界面，当前页面代码中不存在。
 
 ### 网络安全配置
 
