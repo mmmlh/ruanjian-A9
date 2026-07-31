@@ -15,6 +15,18 @@ const DOMAIN = 0x0000
 let formIds: string[] = []
 let updateTimer: number = -1
 
+function isRefreshFormEvent(message: string): boolean {
+  if (message === 'refresh') {
+    return true
+  }
+  try {
+    let event = JSON.parse(message) as Record<string, Object>
+    return event['msg'] === 'refresh'
+  } catch (e) {
+    return false
+  }
+}
+
 function defaultFormPayload(): Record<string, Object> {
   return {
     'temperature': '--',
@@ -175,7 +187,7 @@ export default class EntryFormAbility extends FormExtensionAbility {
 
   onFormEvent(formId: string, message: string): void {
     hilog.info(DOMAIN, TAG, 'onFormEvent: %{public}s', message)
-    if (message === 'refresh') {
+    if (isRefreshFormEvent(message)) {
       let refreshForm = async (): Promise<void> => {
         await initPreferences(this.context)
         let data = await fetchDeviceData()

@@ -52,6 +52,39 @@ process.stdout.write(JSON.stringify(results))
     return json.loads(completed.stdout)
 
 
+def _run_form_refresh_event_behavior_matrix() -> dict[str, bool]:
+    source = FORM_ABILITY.read_text(encoding="utf-8")
+    helper = re.search(
+        r"function isRefreshFormEvent\(message: string\): boolean \{.*?^\}",
+        source,
+        re.DOTALL | re.MULTILINE,
+    )
+    assert helper is not None, "EntryFormAbility must normalize form refresh events"
+
+    javascript = helper.group(0)
+    javascript = javascript.replace(": string", "").replace(": boolean", "")
+    javascript = javascript.replace(" as Record<string, Object>", "")
+    javascript += r'''
+const results = {
+  direct: isRefreshFormEvent('refresh'),
+  serialized: isRefreshFormEvent('{"msg":"refresh","params":{"msg":"refresh"},"action":"message"}'),
+  malformed: isRefreshFormEvent('{"msg":'),
+  unrelated: isRefreshFormEvent('{"msg":"open"}'),
+}
+process.stdout.write(JSON.stringify(results))
+'''
+    node = shutil.which("node")
+    assert node is not None, "node.exe is required for the ArkTS behavior regression test"
+    completed = subprocess.run(
+        [node, "-"],
+        input=javascript,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    return json.loads(completed.stdout)
+
+
 def test_utc_time_utility_defines_display_and_api_contracts():
     assert UTC_UTIL.exists()
 
@@ -143,3 +176,22 @@ def test_client_generated_times_and_history_queries_are_utc():
     for source in (dashboard, monitor, form_ability):
         assert "getHours()" not in source
         assert "getMinutes()" not in source
+
+
+def test_form_refresh_event_normalizes_framework_payloads_safely():
+    results = _run_form_refresh_event_behavior_matrix()
+
+    assert results == {
+        "direct": True,
+        "serialized": True,
+        "malformed": False,
+        "unrelated": False,
+    }
+
+    source = FORM_ABILITY.read_text(encoding="utf-8")
+    assert re.search(
+        r"onFormEvent\(formId: string, message: string\): void \{.*?"
+        r"if \(isRefreshFormEvent\(message\)\)",
+        source,
+        re.DOTALL,
+    ) is not None
