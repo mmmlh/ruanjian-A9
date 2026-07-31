@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.api import (
     auth,
@@ -25,8 +26,14 @@ from app.api import (
 )
 from app.config import CORS_ORIGINS, DEBUG, HOST, PORT
 from app.database import init_db
+from app.database.connection import get_db
 from app.services.device_state_projection import refresh_device_state
-from app.services.mqtt_client import init_mqtt, stop_mqtt, subscribe
+from app.services.mqtt_client import (
+    init_mqtt,
+    is_mqtt_connected,
+    stop_mqtt,
+    subscribe,
+)
 from app.services.rule_engine import rule_engine
 
 logging.basicConfig(
@@ -237,6 +244,32 @@ def root():
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/api/ready")
+def ready():
+    checks = {"database": "down", "mqtt": "down"}
+    try:
+        with get_db() as conn:
+            conn.execute("SELECT 1").fetchone()
+        checks["database"] = "ok"
+    except Exception:
+        logger.exception("database readiness check failed")
+
+    try:
+        if is_mqtt_connected():
+            checks["mqtt"] = "ok"
+    except Exception:
+        logger.exception("MQTT readiness check failed")
+
+    ready_now = all(value == "ok" for value in checks.values())
+    return JSONResponse(
+        status_code=200 if ready_now else 503,
+        content={
+            "status": "ready" if ready_now else "not_ready",
+            "checks": checks,
+        },
+    )
 
 
 @app.websocket("/ws/realtime")

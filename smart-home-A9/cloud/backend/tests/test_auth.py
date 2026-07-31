@@ -16,7 +16,7 @@ class TestAuth:
     def test_health_api(self, client):
         r = client.get("/api/health")
         assert r.status_code == 200
-        assert r.json()["status"] == "ok"
+        assert r.json() == {"status": "ok"}
 
     def test_register_new_user(self, client):
         r = client.post("/api/auth/register", json={

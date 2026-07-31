@@ -5,6 +5,7 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -14,6 +15,13 @@ os.environ["DATABASE_URL"] = f"sqlite:///{TEST_DIR / 'test.db'}"
 os.environ["DEBUG"] = "false"
 
 import app.services.mqtt_client  # noqa: E402
+
+_real_mqtt = SimpleNamespace(
+    init_mqtt=app.services.mqtt_client.init_mqtt,
+    publish_message=app.services.mqtt_client.publish_message,
+    subscribe=app.services.mqtt_client.subscribe,
+    stop_mqtt=app.services.mqtt_client.stop_mqtt,
+)
 
 _mqtt_mocks = [
     patch("app.services.mqtt_client.init_mqtt", MagicMock()),
@@ -58,6 +66,11 @@ def client():
 def auth_headers():
     token = create_token(user_id=1, username="admin", role="admin")
     return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture(scope="session")
+def real_mqtt_functions():
+    return _real_mqtt
 
 
 @pytest.fixture(scope="function")
