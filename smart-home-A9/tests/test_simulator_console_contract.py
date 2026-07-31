@@ -92,6 +92,10 @@ def test_console_has_controller_and_read_only_sensor_views():
 
 def test_console_styles_define_stable_responsive_workbench():
     css = read("styles.css")
+    mobile_css = css.split("@media (max-width: 820px)", 1)[1].split(
+        "@media (max-width: 480px)",
+        1,
+    )[0]
 
     assert "grid-template-columns: minmax(0, 1fr) 300px" in css
     assert "grid-template-rows: 50px minmax(0, 1fr) 164px" in css
@@ -101,6 +105,11 @@ def test_console_styles_define_stable_responsive_workbench():
     assert "font-size: clamp(" not in css
     assert "radial-gradient" not in css
     assert "linear-gradient" not in css
+    assert re.search(
+        r"\.event-console\s*\{[^}]*position:\s*static;",
+        mobile_css,
+        re.DOTALL,
+    )
 
     radii = [int(value) for value in re.findall(r"border-radius:\s*(\d+)px", css)]
     assert radii

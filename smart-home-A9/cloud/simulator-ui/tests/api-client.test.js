@@ -51,6 +51,25 @@ test("logs in and sends the bearer token", async () => {
 });
 
 
+test("invokes browser fetch with the global receiver", async () => {
+  const receivers = [];
+  const fetchFn = function fetchWithReceiverCheck() {
+    receivers.push(this);
+    return Promise.resolve(new Response(JSON.stringify({ status: "ready" }), {
+      status: 200,
+    }));
+  };
+  const client = new ApiClient({
+    fetchFn,
+    credentials: { username: "admin", password: "admin123" },
+  });
+
+  await client.checkReady();
+
+  assert.equal(receivers[0], globalThis);
+});
+
+
 test("reauthenticates once after a 401", async () => {
   let protectedCalls = 0;
   let loginCalls = 0;

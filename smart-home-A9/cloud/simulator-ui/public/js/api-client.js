@@ -58,7 +58,7 @@ export class ApiClient {
   #token = "";
 
   constructor({ fetchFn = globalThis.fetch, credentials }) {
-    this.#fetch = fetchFn;
+    this.#fetch = fetchFn.bind(globalThis);
     this.#credentials = { ...credentials };
   }
 

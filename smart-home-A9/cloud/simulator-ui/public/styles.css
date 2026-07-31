@@ -1203,7 +1203,7 @@ input:disabled {
   }
 
   .event-console {
-    position: sticky;
+    position: static;
     bottom: 0;
     z-index: 8;
     max-height: 300px;

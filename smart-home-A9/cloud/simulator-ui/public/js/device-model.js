@@ -21,6 +21,8 @@ const READ_ONLY_TYPES = new Set([
   "pir_sensor",
 ]);
 
+const SIMULATOR_DEVICE_COUNT = 17;
+
 const MODE_LABELS = {
   cool: "制冷",
   heat: "制热",
@@ -61,7 +63,7 @@ export function normalizeStates(payload) {
       ? item.attributes
       : {};
     const id = Number(attributes.device_id);
-    if (!Number.isInteger(id) || !type) {
+    if (!Number.isInteger(id) || id < 1 || id > SIMULATOR_DEVICE_COUNT || !type) {
       return [];
     }
 

@@ -47,6 +47,23 @@ test("ignores malformed state entries", () => {
 });
 
 
+test("keeps only the 17 devices created by the simulator manager", () => {
+  const extraDevice = {
+    entity_id: "light.device_18",
+    state: "off",
+    attributes: {
+      device_id: 18,
+      friendly_name: "Bound catalog device",
+      room_name: "Living room",
+      mqtt_topic: "home/livingroom/light_extra",
+      online: false,
+    },
+  };
+
+  assert.deepEqual(normalizeStates([...states, extraDevice]), normalizeStates(states));
+});
+
+
 test("filters by room, type, online state, name, and MQTT topic", () => {
   const devices = normalizeStates(states);
 
