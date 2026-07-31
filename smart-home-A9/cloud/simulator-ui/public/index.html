@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light">
+  <title>A9 模拟器控制台</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div id="startup-status" class="startup-status" role="status" aria-live="polite">
+    <div class="startup-mark" aria-hidden="true">A9</div>
+    <p>正在连接模拟器服务</p>
+  </div>
+
+  <div class="app-shell" hidden>
+    <header class="topbar">
+      <div class="product-lockup">
+        <span class="product-mark" aria-hidden="true">A9</span>
+        <div>
+          <strong>模拟器控制台</strong>
+          <span>设备运行</span>
+        </div>
+      </div>
+      <div id="service-health" class="service-health" aria-label="服务状态"></div>
+    </header>
+
+    <main class="workbench">
+      <section class="inventory" aria-label="模拟设备">
+        <div id="metric-strip" class="metric-strip"></div>
+        <div class="device-toolbar">
+          <label class="search-field" for="device-search">
+            <i data-lucide="search" aria-hidden="true"></i>
+            <input id="device-search" type="search" autocomplete="off" placeholder="搜索名称或 MQTT 主题">
+          </label>
+          <label class="select-field">
+            <span class="sr-only">房间</span>
+            <select id="room-filter"><option value="all">全部房间</option></select>
+          </label>
+          <label class="select-field">
+            <span class="sr-only">设备类型</span>
+            <select id="type-filter"><option value="all">全部类型</option></select>
+          </label>
+          <label class="select-field">
+            <span class="sr-only">在线状态</span>
+            <select id="online-filter">
+              <option value="all">全部状态</option>
+              <option value="online">在线</option>
+              <option value="offline">离线</option>
+            </select>
+          </label>
+          <button id="refresh-button" class="icon-button" type="button" title="刷新设备" aria-label="刷新设备">
+            <i data-lucide="refresh-cw" aria-hidden="true"></i>
+          </button>
+        </div>
+
+        <div class="device-table-wrap">
+          <table class="device-table">
+            <thead>
+              <tr>
+                <th scope="col">状态</th>
+                <th scope="col">设备</th>
+                <th scope="col">房间</th>
+                <th scope="col">当前状态</th>
+                <th scope="col">最后更新</th>
+              </tr>
+            </thead>
+            <tbody id="device-list"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <aside id="device-inspector" class="device-inspector" aria-label="设备控制"></aside>
+    </main>
+
+    <section class="event-console" aria-label="实时 MQTT 事件">
+      <header class="event-toolbar">
+        <div>
+          <strong>实时 MQTT 事件</strong>
+          <span id="event-connection-state">正在连接</span>
+        </div>
+        <label class="event-topic-filter">
+          <span class="sr-only">事件主题过滤</span>
+          <input id="event-topic-filter" type="search" autocomplete="off" placeholder="过滤主题">
+        </label>
+        <button id="event-pause-button" class="icon-button icon-button-dark" type="button" title="暂停自动滚动" aria-label="暂停自动滚动">
+          <i data-lucide="pause" aria-hidden="true"></i>
+        </button>
+        <button id="event-clear-button" class="icon-button icon-button-dark" type="button" title="清空本地事件" aria-label="清空本地事件">
+          <i data-lucide="trash-2" aria-hidden="true"></i>
+        </button>
+      </header>
+      <div id="event-list" class="event-list" role="log" aria-live="off"></div>
+    </section>
+  </div>
+
+  <div id="toast-region" aria-live="polite" aria-atomic="true"></div>
+
+  <script src="./vendor/lucide.min.js"></script>
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>

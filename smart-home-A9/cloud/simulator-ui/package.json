@@ -1,0 +1,8 @@
+{
+  "name": "smart-home-a9-simulator-console",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/device-model.test.js tests/api-client.test.js"
+  }
+}
