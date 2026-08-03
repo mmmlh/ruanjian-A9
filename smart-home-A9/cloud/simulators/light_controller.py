@@ -2,7 +2,6 @@
 智能灯控制器模拟器 — 支持开关、亮度、色温
 """
 import time
-import json
 from base_device import BaseDevice
 
 
@@ -19,33 +18,61 @@ class LightController(BaseDevice):
         # 灯不主动产生数据，只在状态变化时上报
         return None
 
+    def capabilities(self) -> dict:
+        return {
+            "actions": ["on", "off", "set"],
+            "params": {
+                "brightness": {"min": 0, "max": 100},
+                "color": {"values": ["warm", "neutral", "cool"]},
+            },
+        }
+
+    def _state(self) -> dict:
+        return {
+            "power": self.power,
+            "brightness": self.brightness,
+            "color": self.color,
+        }
+
     def handle_command(self, payload: dict):
         action = payload.get("action")
+        success = True
+        error_code = None
         if action == "on":
-            self.power = "on"
-            self.brightness = payload.get("brightness", 80)
-            self.color = payload.get("color", "warm")
-            self.on_time = time.time()
+            brightness = payload.get("brightness", 80)
+            color = payload.get("color", "warm")
+            if not isinstance(brightness, (int, float)) or not 0 <= brightness <= 100:
+                success, error_code = False, "INVALID_PARAMS"
+            elif color not in {"warm", "neutral", "cool"}:
+                success, error_code = False, "INVALID_PARAMS"
+            else:
+                self.power = "on"
+                self.brightness = brightness
+                self.color = color
+                self.on_time = time.time()
         elif action == "off":
             self.power = "off"
             self.brightness = 0
             self.on_time = None
         elif action == "set":
-            if "brightness" in payload:
-                self.brightness = payload["brightness"]
-            if "color" in payload:
-                self.color = payload["color"]
+            brightness = payload.get("brightness")
+            color = payload.get("color")
+            if brightness is not None and (not isinstance(brightness, (int, float)) or not 0 <= brightness <= 100):
+                success, error_code = False, "INVALID_PARAMS"
+            elif color is not None and color not in {"warm", "neutral", "cool"}:
+                success, error_code = False, "INVALID_PARAMS"
+            else:
+                if brightness is not None:
+                    self.brightness = brightness
+                if color is not None:
+                    self.color = color
+        else:
+            success, error_code = False, "UNSUPPORTED_ACTION"
 
-        status = {
-            "power": self.power,
-            "brightness": self.brightness,
-            "color": self.color,
-            "device_id": f"light_{self.device_id:03d}",
-        }
-        self.publish_status(status)
-
-        # 响应
-        self._publish_response(True, status)
+        state = self._state()
+        status = {**state, "device_id": f"light_{self.device_id:03d}"}
+        self.publish_status(status, payload.get("command_id"))
+        self.publish_ack(payload, success, state, error_code)
 
     def get_state(self) -> dict:
         state = {
@@ -56,12 +83,6 @@ class LightController(BaseDevice):
         if self.on_time:
             state["on_duration_sec"] = int(time.time() - self.on_time)
         return state
-
-    def _publish_response(self, success: bool, state: dict):
-        topic = f"{self.topic_base}/response"
-        resp = {"success": success, "state": state}
-        if self.client:
-            self.client.publish(topic, json.dumps(resp), qos=1)
 
     def _sleep(self):
         """灯控制器空闲等待"""

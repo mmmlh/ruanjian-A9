@@ -28,6 +28,12 @@ from app.config import CORS_ORIGINS, DEBUG, HOST, PORT
 from app.database import init_db
 from app.database.connection import get_db
 from app.services.device_state_projection import refresh_device_state
+from app.services.device_protocol import (
+    reconcile_ack,
+    record_device_message,
+    record_heartbeat,
+    record_hello,
+)
 from app.services.mqtt_client import (
     init_mqtt,
     is_mqtt_connected,
@@ -62,13 +68,25 @@ def on_mqtt_message(topic: str, payload):
         logger.warning("ignored non-mapping MQTT payload on topic %s", topic)
         return
 
-    _persist_sensor_data(topic, payload)
-    synced = _sync_device_status(topic, payload)
-    if synced is not None:
-        device_id, _ = synced
-        refresh_device_state(device_id)
+    message_kind = topic.rsplit("/", 1)[-1]
+    if message_kind == "hello":
+        record_hello(topic, payload)
+    elif message_kind == "heartbeat":
+        record_heartbeat(topic, payload)
+    elif message_kind == "ack":
+        synced = reconcile_ack(topic, payload)
+        if synced is not None:
+            refresh_device_state(synced[0])
+    else:
+        _persist_sensor_data(topic, payload)
+        synced = _sync_device_status(topic, payload)
+        if synced is not None:
+            device_id, _ = synced
+            refresh_device_state(device_id)
+        record_device_message(topic)
 
-    rule_engine.on_sensor_data(topic, payload)
+    if message_kind == "sensor":
+        rule_engine.on_sensor_data(topic, payload)
 
     msg = {"type": "mqtt", "topic": topic, "payload": payload}
     if _main_event_loop and _main_event_loop.is_running():
@@ -152,6 +170,10 @@ def _sync_device_status(topic: str, payload) -> tuple[int, dict] | None:
             return
         payload = response_state
 
+    # Command-correlated reports are only persisted by their matching ACK.
+    if isinstance(payload, dict) and isinstance(payload.get("command_id"), str):
+        return None
+
     status = {
         key: value
         for key, value in payload.items()
@@ -166,15 +188,23 @@ def _sync_device_status(topic: str, payload) -> tuple[int, dict] | None:
         synced: tuple[int, dict] | None = None
         with get_db() as conn:
             device = conn.execute(
-                "SELECT id FROM devices WHERE mqtt_topic = ?",
+                "SELECT id, status_json FROM devices WHERE mqtt_topic = ?",
                 (mqtt_topic,),
             ).fetchone()
             if device:
+                try:
+                    current_status = json.loads(device["status_json"] or "{}")
+                except (TypeError, json.JSONDecodeError):
+                    current_status = {}
+                if not isinstance(current_status, dict):
+                    current_status = {}
+                merged_status = {**current_status, **status}
                 conn.execute(
-                    "UPDATE devices SET status_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (json.dumps(status), device["id"]),
+                    "UPDATE devices SET status_json = ?, updated_at = CURRENT_TIMESTAMP, "
+                    "last_seen_at = CURRENT_TIMESTAMP, connection_state = 'online' WHERE id = ?",
+                    (json.dumps(merged_status), device["id"]),
                 )
-                synced = (device["id"], status)
+                synced = (device["id"], merged_status)
         return synced
     except Exception as exc:
         logger.error("device status sync failed: %s", exc)

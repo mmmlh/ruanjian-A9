@@ -47,6 +47,8 @@ def call_service(req: ServiceCallRequest, user: dict = Depends(get_current_user)
         "message": result["message"],
         "entity_id": entity_id,
         "action": executed_action,
+        "command_id": result["command_id"],
+        "command_status": result["command_status"],
         "changed_states": [changed_state] if changed_state else [],
         "service_response": {
             entity_id: {

@@ -522,6 +522,12 @@ export async function getDevice(deviceId: number): Promise<Device> {
   return mapDevice(result)
 }
 
+export async function getCommandStatus(commandId: string): Promise<Record<string, Object>> {
+  return request<Record<string, Object>>(
+    http.RequestMethod.GET, `/api/devices/commands/${encodeURIComponent(commandId)}`
+  )
+}
+
 export async function callService(entityId: string, action: string, params?: Object): Promise<ServiceCallResult> {
   let body: Record<string, Object> = {
     'entity_id': entityId,
@@ -558,6 +564,8 @@ export async function callService(entityId: string, action: string, params?: Obj
   serviceResult.message = readString(result, 'message')
   serviceResult.entity_id = readString(result, 'entity_id', entityId)
   serviceResult.action = readString(result, 'action', action)
+  serviceResult.command_id = readString(result, 'command_id')
+  serviceResult.command_status = readString(result, 'command_status')
   serviceResult.executed_at = readString(result, 'executed_at')
   serviceResult.service_response = readObject(result, 'service_response')
 

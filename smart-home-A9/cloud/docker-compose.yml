@@ -20,6 +20,8 @@ services:
       - "8000:8000"
     environment:
       - DATABASE_URL=sqlite:///data/smart_home.db
+      # WAL shared-memory locking is unreliable on Docker Desktop bind mounts.
+      - SQLITE_JOURNAL_MODE=DELETE
       - MQTT_BROKER=mqtt
       - MQTT_PORT=1883
       # Local simulator integration uses the internal plain-MQTT listener.

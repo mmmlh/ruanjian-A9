@@ -1,4 +1,4 @@
-import { callService, buildEntityId, getAesKey, getDevicesForUi } from '../common/ApiClient'
+import { callService, buildEntityId, getAesKey, getCommandStatus, getDevicesForUi } from '../common/ApiClient'
 import { ControlCenterTheme } from '../common/ControlCenterTheme'
 import { AppTopBar, SectionTitle, StatusBanner, MetricChip } from '../common/ControlCenterKit'
 import { generateAuthCode } from '../common/CryptoUtil'
@@ -60,6 +60,7 @@ struct DeviceRemotePage {
   private dlMT: number = -1
   private sliderTimer: number = -1
   private environmentTimer: number = -1
+  private commandStatusTimer: number = -1
 
   @State ctPs: number = 0
 
@@ -94,6 +95,10 @@ struct DeviceRemotePage {
     if (this.dlMT > 0) {
       clearTimeout(this.dlMT)
       this.dlMT = -1
+    }
+    if (this.commandStatusTimer > 0) {
+      clearTimeout(this.commandStatusTimer)
+      this.commandStatusTimer = -1
     }
   }
 
@@ -236,31 +241,43 @@ struct DeviceRemotePage {
     try {
       let entityId = buildEntityId(this.dt, id)
       let result = await callService(entityId, action, params)
-      this.successMessage = localizeSuccessMessage(result.message, '设备控制成功')
-      if (result.changed_states.length > 0) {
-        let updated = result.changed_states[0]
-        let current = this.cur()
-        if (current) {
-          current.status_json = JSON.stringify(updated.attributes)
-          current.updated_at = updated.last_updated
-          current.last_seen_at = updated.last_updated
-          let onlineVal = updated.attributes['online']
-          if (onlineVal !== undefined && onlineVal !== null) {
-            current.online = onlineVal as boolean
-          }
-          let summaryVal = updated.attributes['status_summary']
-          if (summaryVal !== undefined && summaryVal !== null) {
-            current.status_summary = summaryVal as string
-          }
-          this.sl(this.ix)
-        }
+      if (result.command_status === 'pending' && result.command_id) {
+        this.successMessage = '设备指令已发送，等待设备确认'
+        this.waitForCommandAcknowledgement(result.command_id)
+      } else {
+        this.successMessage = localizeSuccessMessage(result.message, '设备控制成功')
+        await this.load()
       }
-      await this.load()
     } catch (err) {
       this.errorMessage = localizeMessage((err as Error).message, '设备操作失败')
     } finally {
       this.commandBusy = false
     }
+  }
+
+  waitForCommandAcknowledgement(commandId: string, attempts: number = 0): void {
+    if (attempts >= 15) {
+      this.successMessage = '设备未确认指令，请检查设备连接'
+      return
+    }
+    this.commandStatusTimer = setTimeout(async () => {
+      try {
+        let command = await getCommandStatus(commandId)
+        let commandStatus = command['status'] as string
+        if (commandStatus === 'acknowledged') {
+          await this.load()
+          this.successMessage = '设备已确认并完成执行'
+        } else if (commandStatus === 'failed') {
+          this.errorMessage = '设备拒绝执行该指令'
+        } else if (commandStatus === 'timed_out') {
+          this.errorMessage = '等待设备确认超时'
+        } else {
+          this.waitForCommandAcknowledgement(commandId, attempts + 1)
+        }
+      } catch (err) {
+        this.errorMessage = localizeMessage((err as Error).message, '查询设备确认状态失败')
+      }
+    }, 800)
   }
 
   async cmdCurrent(action: string, params?: Object): Promise<void> {
@@ -391,13 +408,12 @@ struct DeviceRemotePage {
         let params = new CommandParams()
         params.auth_code = code
         await this.cmd(id, 'unlock', params)
-        this.dlMsg = '门锁解锁成功'
+        this.dlMsg = '门锁解锁指令已发送，等待设备确认'
         this.dlSh = true
-        this.autoLockTick()
       } else {
         this.clr()
         await this.cmd(id, 'lock')
-        this.dlMsg = '门锁已重新上锁'
+        this.dlMsg = '门锁上锁指令已发送，等待设备确认'
         this.dlSh = true
       }
       this.dlMT = setTimeout(() => {

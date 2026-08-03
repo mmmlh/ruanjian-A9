@@ -7,7 +7,16 @@ import pytest
 
 import app.services.device_command as device_command_service
 import app.services.rule_engine as rule_engine_service
+from app.main import on_mqtt_message
 from app.services.rule_engine import rule_engine
+
+
+def assert_command_messages(published, expected):
+    assert len(published) == len(expected)
+    for (topic, payload), (expected_topic, expected_payload) in zip(published, expected):
+        assert topic == expected_topic
+        assert payload.get("command_id")
+        assert {key: value for key, value in payload.items() if key != "command_id"} == expected_payload
 
 
 class TestRules:
@@ -265,6 +274,14 @@ class TestRuleStateIntegration:
             {"presence": True},
         )
 
+        on_mqtt_message(
+            "home/livingroom/light/ack",
+            {
+                "command_id": published[0][1]["command_id"],
+                "success": True,
+                "state": {"power": "on", "brightness": 80},
+            },
+        )
         from app.services.device_state_projection import device_state_projection
 
         stored = json.loads(
@@ -278,9 +295,9 @@ class TestRuleStateIntegration:
         activity = db.execute(
             "SELECT source FROM activity_log WHERE event_type = 'rule'"
         ).fetchone()
-        assert published == [
+        assert_command_messages(published, [
             ("home/livingroom/light/command", {"action": "on", "brightness": 80})
-        ]
+        ])
         assert stored == {"power": "on", "brightness": 80}
         assert device_state_projection.get(4) == stored
         assert tuple(device_log) == ("on", None)
@@ -327,6 +344,14 @@ class TestRuleStateIntegration:
             {"presence": True},
         )
 
+        on_mqtt_message(
+            "home/livingroom/secondary_light/ack",
+            {
+                "command_id": published[0][1]["command_id"],
+                "success": True,
+                "state": {"power": "on", "brightness": 18},
+            },
+        )
         main_status = json.loads(
             db.execute("SELECT status_json FROM devices WHERE id = 4").fetchone()[
                 "status_json"
@@ -337,12 +362,12 @@ class TestRuleStateIntegration:
                 "SELECT status_json FROM devices WHERE id = ?", (target_id,)
             ).fetchone()["status_json"]
         )
-        assert published == [
+        assert_command_messages(published, [
             (
                 "home/livingroom/secondary_light/command",
                 {"action": "on", "brightness": 18},
             )
-        ]
+        ])
         assert main_status["power"] == "off"
         assert target_status == {"power": "on", "brightness": 18}
         assert db.execute(
@@ -533,15 +558,23 @@ class TestRuleStateIntegration:
             {"presence": True},
         )
 
+        on_mqtt_message(
+            "home/livingroom/light/ack",
+            {
+                "command_id": published[0][1]["command_id"],
+                "success": True,
+                "state": {"power": "on", "brightness": 64},
+            },
+        )
         stored = json.loads(
             db.execute(
                 "SELECT status_json FROM devices WHERE id = ?",
                 (replacement_id,),
             ).fetchone()["status_json"]
         )
-        assert published == [
+        assert_command_messages(published, [
             ("home/livingroom/light/command", {"action": "on", "brightness": 64})
-        ]
+        ])
         assert stored == {"power": "on", "brightness": 64}
         assert db.execute(
             "SELECT COUNT(*) FROM device_log WHERE device_id = ?",

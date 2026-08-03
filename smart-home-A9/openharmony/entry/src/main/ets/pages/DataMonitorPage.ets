@@ -392,23 +392,23 @@ struct DataMonitorPage {
 
   @Builder buildTabs() {
     Row() {
-      this.tabChip('实时数据', this.tab === 0, () => { this.tab = 0 })
-      this.tabChip('历史记录', this.tab === 1, () => { this.tab = 1; this.refresh() })
-      this.tabChip('运行日志', this.tab === 2, () => { this.tab = 2; this.refresh() })
+      this.tabChip('实时数据', 0, () => { this.tab = 0 })
+      this.tabChip('历史记录', 1, () => { this.tab = 1; this.refresh() })
+      this.tabChip('运行日志', 2, () => { this.tab = 2; this.refresh() })
     }
     .width('100%')
     .margin({ top: 16 })
   }
 
-  @Builder tabChip(label: string, active: boolean, action: () => void) {
+  @Builder tabChip(label: string, tabId: number, action: () => void) {
     Text(label)
       .height(ControlCenterTheme.tapTarget)
       .fontSize(12)
-      .fontWeight(active ? FontWeight.Bold : FontWeight.Medium)
-      .fontColor(active ? '#FFFFFF' : TEXT_SECONDARY)
+      .fontWeight(this.tab === tabId ? FontWeight.Bold : FontWeight.Medium)
+      .fontColor(this.tab === tabId ? '#FFFFFF' : TEXT_SECONDARY)
       .padding({ left: 18, right: 18, top: 10, bottom: 10 })
       .borderRadius(14)
-      .backgroundColor(active ? PRIMARY : CARD_BG)
+      .backgroundColor(this.tab === tabId ? PRIMARY : CARD_BG)
       .margin({ right: 8 })
       .onClick(action)
   }
@@ -450,15 +450,15 @@ struct DataMonitorPage {
   }
 
   @Builder buildHistoryPanel() {
-    if (this.historyLoading) {
+    if (this.historyLoading && this.sdata.length === 0) {
       this.buildSectionLoading('正在刷新历史记录...')
     } else {
       Column() {
         Scroll() {
           Row() {
-            this.filterChip('全部传感器', this.curId === 0, () => { this.curId = 0; this.refresh() })
+            this.filterChip('全部传感器', 0, () => { this.curId = 0; this.refresh() })
             ForEach(this.sensors, (device: Device) => {
-              this.filterChip(device.name, this.curId === device.id, () => { this.curId = device.id; this.refresh() })
+              this.filterChip(device.name, device.id, () => { this.curId = device.id; this.refresh() })
             }, (device: Device) => device.id.toString())
           }
         }
@@ -467,8 +467,8 @@ struct DataMonitorPage {
         .width('100%')
 
         Row() {
-          this.rangeChip('24小时', this.historyHours === 24, () => { this.historyHours = 24; this.refresh() })
-          this.rangeChip('7天', this.historyHours === 168, () => { this.historyHours = 168; this.refresh() })
+          this.rangeChip('24小时', 24, () => { this.historyHours = 24; this.refresh() })
+          this.rangeChip('7天', 168, () => { this.historyHours = 168; this.refresh() })
         }
         .width('100%')
         .margin({ top: 12 })
@@ -522,7 +522,7 @@ struct DataMonitorPage {
   }
 
   @Builder buildLogsPanel() {
-    if (this.logsLoading) {
+    if (this.logsLoading && this.logs.length === 0) {
       this.buildSectionLoading('正在刷新日志...')
     } else if (this.logs.length === 0) {
       this.buildEmptyState('暂无操作日志', '设备与自动化日志会显示在这里')
@@ -558,28 +558,28 @@ struct DataMonitorPage {
     }
   }
 
-  @Builder filterChip(label: string, active: boolean, action: () => void) {
+  @Builder filterChip(label: string, deviceId: number, action: () => void) {
     Text(label)
       .height(ControlCenterTheme.tapTarget)
       .fontSize(12)
-      .fontWeight(active ? FontWeight.Bold : FontWeight.Medium)
-      .fontColor(active ? '#FFFFFF' : TEXT_SECONDARY)
+      .fontWeight(this.curId === deviceId ? FontWeight.Bold : FontWeight.Medium)
+      .fontColor(this.curId === deviceId ? '#FFFFFF' : TEXT_SECONDARY)
       .padding({ left: 16, right: 16, top: 10, bottom: 10 })
       .borderRadius(14)
-      .backgroundColor(active ? PRIMARY : CARD_BG)
+      .backgroundColor(this.curId === deviceId ? PRIMARY : CARD_BG)
       .margin({ right: 8 })
       .onClick(action)
   }
 
-  @Builder rangeChip(label: string, active: boolean, action: () => void) {
+  @Builder rangeChip(label: string, hours: number, action: () => void) {
     Text(label)
       .height(ControlCenterTheme.tapTarget)
       .fontSize(12)
-      .fontWeight(active ? FontWeight.Bold : FontWeight.Medium)
-      .fontColor(active ? '#FFFFFF' : TEXT_SECONDARY)
+      .fontWeight(this.historyHours === hours ? FontWeight.Bold : FontWeight.Medium)
+      .fontColor(this.historyHours === hours ? '#FFFFFF' : TEXT_SECONDARY)
       .padding({ left: 16, right: 16, top: 10, bottom: 10 })
       .borderRadius(14)
-      .backgroundColor(active ? PRIMARY : ControlCenterTheme.surfaceMuted)
+      .backgroundColor(this.historyHours === hours ? PRIMARY : ControlCenterTheme.surfaceMuted)
       .margin({ right: 8 })
       .onClick(action)
   }

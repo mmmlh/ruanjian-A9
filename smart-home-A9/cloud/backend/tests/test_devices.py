@@ -64,7 +64,10 @@ class TestDevices:
         assert all("room_id" in device for device in data)
 
     def test_list_devices_include_presentation_fields(self, client, auth_headers, db):
-        db.execute("UPDATE devices SET updated_at = ? WHERE id = 4", ("2000-01-01 00:00:00",))
+        db.execute(
+            "UPDATE devices SET last_seen_at = ?, connection_state = 'offline' WHERE id = 4",
+            ("2000-01-01 00:00:00",),
+        )
         db.commit()
 
         response = client.get("/api/devices", headers=auth_headers)
@@ -79,7 +82,7 @@ class TestDevices:
         assert parsed.tzinfo is not None
 
     def test_device_detail_returns_null_last_seen_for_missing_timestamp(self, client, auth_headers, db):
-        db.execute("UPDATE devices SET updated_at = NULL, created_at = NULL WHERE id = 4")
+        db.execute("UPDATE devices SET last_seen_at = NULL WHERE id = 4")
         db.commit()
 
         response = client.get("/api/devices/4", headers=auth_headers)
@@ -90,7 +93,7 @@ class TestDevices:
         assert data["last_seen_at"] is None
 
     def test_device_detail_returns_null_last_seen_for_invalid_timestamp(self, client, auth_headers, db):
-        db.execute("UPDATE devices SET updated_at = ? WHERE id = 4", ("not-a-date",))
+        db.execute("UPDATE devices SET last_seen_at = ? WHERE id = 4", ("not-a-date",))
         db.commit()
 
         response = client.get("/api/devices/4", headers=auth_headers)
@@ -306,6 +309,15 @@ class TestDevices:
             "/api/devices/4/command",
             json={"action": "off", "params": {"brightness": 60}},
             headers=auth_headers,
+        )
+        command_id = response.json()["command_id"]
+        on_mqtt_message(
+            "home/livingroom/light/ack",
+            {
+                "command_id": command_id,
+                "success": True,
+                "state": {"power": "off", "brightness": 0, "color": "warm"},
+            },
         )
 
         stored = json.loads(
@@ -747,10 +759,10 @@ class TestDevices:
         assert payload["entity_id"] == "light.device_4"
         assert payload["action"] == "on"
         assert len(payload["changed_states"]) == 1
-        assert payload["service_response"]["light.device_4"]["payload"] == {
-            "action": "on",
-            "brightness": 75,
-        }
+        command_payload = payload["service_response"]["light.device_4"]["payload"]
+        assert command_payload["action"] == "on"
+        assert command_payload["brightness"] == 75
+        assert command_payload["command_id"]
         assert isinstance(payload["executed_at"], str)
         assert payload["executed_at"].strip()
 
@@ -863,6 +875,15 @@ class TestDeviceStateProjection:
             "/api/devices/4/command",
             json={"action": "on", "params": {"brightness": 63}},
             headers=auth_headers,
+        )
+        command_id = response.json()["command_id"]
+        on_mqtt_message(
+            "home/livingroom/light/ack",
+            {
+                "command_id": command_id,
+                "success": True,
+                "state": {"power": "on", "brightness": 63, "color": "warm"},
+            },
         )
 
         assert response.status_code == 200
@@ -1136,38 +1157,17 @@ class TestProjectionFailureConsistency:
         assert projection.refresh(4, lambda: None) is None
         assert projection.get(4) is None
 
-    def test_late_command_refresh_reads_latest_committed_sqlite_state(
+    def test_multiple_pending_commands_do_not_overwrite_confirmed_state(
         self,
         client,
         db,
         monkeypatch,
     ):
-        from app.services.device_state_projection import device_state_projection
-
-        real_refresh = getattr(device_state_projection, "refresh", None)
-        old_refresh_started = threading.Event()
-        release_old_refresh = threading.Event()
-        new_command_finished = threading.Event()
         errors = []
-
-        def controlled_refresh(device_id, loader):
-            if threading.current_thread().name == "old-command":
-                old_refresh_started.set()
-                if not release_old_refresh.wait(timeout=2):
-                    raise TimeoutError("old refresh was not released")
-            if real_refresh is None:
-                raise AssertionError("refresh is not implemented")
-            return real_refresh(device_id, loader)
-
-        monkeypatch.setattr(
-            device_state_projection,
-            "refresh",
-            controlled_refresh,
-            raising=False,
-        )
         monkeypatch.setattr(device_command_service, "publish_message", lambda *_: None)
+        before = db.execute("SELECT status_json FROM devices WHERE id = 4").fetchone()["status_json"]
 
-        def run_command(brightness, finished=None):
+        def run_command(brightness):
             try:
                 device_command_service.execute_device_command(
                     4,
@@ -1177,44 +1177,25 @@ class TestProjectionFailureConsistency:
                 )
             except Exception as exc:
                 errors.append(exc)
-            finally:
-                if finished is not None:
-                    finished.set()
 
-        old_thread = threading.Thread(
-            target=run_command,
-            args=(10,),
-            name="old-command",
-            daemon=True,
-        )
-        new_thread = None
-        old_thread.start()
-        try:
-            assert old_refresh_started.wait(timeout=1)
-            new_thread = threading.Thread(
-                target=run_command,
-                args=(90, new_command_finished),
-                name="new-command",
-                daemon=True,
-            )
-            new_thread.start()
-            assert new_command_finished.wait(timeout=2)
-        finally:
-            release_old_refresh.set()
-            old_thread.join(timeout=2)
-            if new_thread is not None:
-                new_thread.join(timeout=2)
+        first = threading.Thread(target=run_command, args=(10,), daemon=True)
+        second = threading.Thread(target=run_command, args=(90,), daemon=True)
+        first.start()
+        second.start()
+        first.join(timeout=2)
+        second.join(timeout=2)
 
-        stored = json.loads(
-            db.execute("SELECT status_json FROM devices WHERE id = 4").fetchone()[
-                "status_json"
-            ]
-        )
         assert errors == []
-        assert not old_thread.is_alive()
-        assert new_thread is not None and not new_thread.is_alive()
-        assert stored["brightness"] == 90
-        assert device_state_projection.get(4)["brightness"] == 90
+        assert not first.is_alive()
+        assert not second.is_alive()
+        assert db.execute("SELECT status_json FROM devices WHERE id = 4").fetchone()["status_json"] == before
+        statuses = [
+            row["status"]
+            for row in db.execute(
+                "SELECT status FROM device_commands WHERE device_id = 4 ORDER BY id"
+            )
+        ]
+        assert statuses == ["pending", "pending"]
 
     def test_mqtt_status_db_failure_stops_projection_rules_and_websocket(
         self,
@@ -1268,7 +1249,7 @@ class TestProjectionFailureConsistency:
             {"power": "on"},
         ) is None
 
-    def test_direct_command_hides_post_dispatch_database_failure(
+    def test_direct_command_does_not_dispatch_when_command_ledger_persistence_fails(
         self,
         client,
         auth_headers,
@@ -1313,12 +1294,10 @@ class TestProjectionFailureConsistency:
             headers=auth_headers,
         )
 
-        assert response.status_code == 502
-        assert response.json()["detail"] == "command_post_dispatch_failed"
+        assert response.status_code == 503
+        assert response.json()["detail"] == "command_persistence_failed"
         assert "sqlite" not in response.text.lower()
-        assert published == [
-            ("home/livingroom/light/command", {"action": "on", "brightness": 40})
-        ]
+        assert published == []
         assert db.execute(
             "SELECT status_json FROM devices WHERE id = 4"
         ).fetchone()["status_json"] == before_status
@@ -1326,7 +1305,7 @@ class TestProjectionFailureConsistency:
             "SELECT COUNT(*) FROM device_log WHERE device_id = 4"
         ).fetchone()[0] == before_logs
 
-    def test_direct_command_wraps_projection_refresh_failure_after_commit(
+    def test_direct_command_does_not_refresh_projection_before_device_confirmation(
         self,
         client,
         auth_headers,
@@ -1362,13 +1341,15 @@ class TestProjectionFailureConsistency:
                 "status_json"
             ]
         )
-        assert response.status_code == 502
-        assert response.json()["detail"] == "command_post_dispatch_failed"
-        assert published == [
-            ("home/livingroom/light/command", {"action": "on", "brightness": 41})
-        ]
-        assert stored["power"] == "on"
-        assert stored["brightness"] == 41
+        assert response.status_code == 200
+        assert response.json()["command_status"] == "pending"
+        assert len(published) == 1
+        assert published[0][0] == "home/livingroom/light/command"
+        assert published[0][1]["action"] == "on"
+        assert published[0][1]["brightness"] == 41
+        assert published[0][1]["command_id"]
+        assert stored["power"] == "off"
+        assert stored["brightness"] == 0
         assert db.execute(
             "SELECT COUNT(*) FROM device_log WHERE device_id = 4"
         ).fetchone()[0] == before_logs + 1
@@ -1422,7 +1403,7 @@ class TestProjectionFailureConsistency:
         assert stored["brightness"] == 77
         assert projection_service.device_state_projection.get(4) is None
 
-    def test_command_merges_state_committed_while_publish_is_in_flight(
+    def test_pending_command_does_not_overwrite_state_committed_while_publish_is_in_flight(
         self,
         client,
         db,
@@ -1481,13 +1462,16 @@ class TestProjectionFailureConsistency:
         )
         assert not command_thread.is_alive()
         assert errors == []
-        assert stored["brightness"] == 10
+        assert stored["brightness"] == 0
         assert stored["color"] == "red"
         assert db.execute(
             "SELECT COUNT(*) FROM device_log WHERE device_id = 4"
         ).fetchone()[0] == before_logs + 1
+        assert db.execute(
+            "SELECT status FROM device_commands WHERE device_id = 4 ORDER BY id DESC LIMIT 1"
+        ).fetchone()["status"] == "pending"
 
-    def test_concurrent_commands_preserve_publish_and_commit_order(
+    def test_concurrent_commands_preserve_publish_and_pending_ledger_order(
         self,
         client,
         db,
@@ -1564,7 +1548,14 @@ class TestProjectionFailureConsistency:
         assert errors == []
         assert published == [10, 90]
         assert committed == published
-        assert stored["brightness"] == 90
+        assert stored["brightness"] == 0
+        command_statuses = [
+            row["status"]
+            for row in db.execute(
+                "SELECT status FROM device_commands WHERE device_id = 4 ORDER BY id"
+            )
+        ]
+        assert command_statuses == ["pending", "pending"]
 
 
 class TestDeviceLifecycleProjection:

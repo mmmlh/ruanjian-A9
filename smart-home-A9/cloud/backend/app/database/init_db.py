@@ -92,11 +92,42 @@ def ensure_schema(conn: sqlite3.Connection):
         row[1]
         for row in conn.execute("PRAGMA table_info(devices)").fetchall()
     }
+    device_column_definitions = {
+        "updated_at": "DATETIME",
+        "hardware_id": "TEXT",
+        "protocol_version": "TEXT",
+        "capabilities_json": "TEXT DEFAULT '{}'",
+        "last_seen_at": "DATETIME",
+        "connection_state": "TEXT NOT NULL DEFAULT 'offline'",
+    }
+    for column, definition in device_column_definitions.items():
+        if device_columns and column not in device_columns:
+            conn.execute(f"ALTER TABLE devices ADD COLUMN {column} {definition}")
+
     if device_columns and "updated_at" not in device_columns:
-        conn.execute("ALTER TABLE devices ADD COLUMN updated_at DATETIME")
         conn.execute(
             "UPDATE devices SET updated_at = COALESCE(updated_at, created_at, CURRENT_TIMESTAMP)"
         )
+
+    conn.executescript("""
+    CREATE TABLE IF NOT EXISTS device_commands (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        command_id      TEXT NOT NULL UNIQUE,
+        device_id       INTEGER NOT NULL REFERENCES devices(id),
+        action          TEXT NOT NULL,
+        params_json     TEXT NOT NULL,
+        status          TEXT NOT NULL CHECK (status IN ('pending', 'acknowledged', 'failed', 'timed_out')),
+        sent_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        acknowledged_at DATETIME,
+        response_json   TEXT,
+        error_code      TEXT,
+        attempt_count   INTEGER NOT NULL DEFAULT 1
+    );
+    CREATE INDEX IF NOT EXISTS idx_device_commands_device_sent
+        ON device_commands(device_id, sent_at);
+    CREATE INDEX IF NOT EXISTS idx_device_commands_status_sent
+        ON device_commands(status, sent_at);
+    """)
 
 
 def ensure_device_constraints(conn: sqlite3.Connection):
@@ -144,7 +175,12 @@ def create_tables(conn: sqlite3.Connection):
         mqtt_topic  TEXT NOT NULL,
         status_json TEXT DEFAULT '{}',
         created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+        updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+        hardware_id TEXT,
+        protocol_version TEXT,
+        capabilities_json TEXT DEFAULT '{}',
+        last_seen_at DATETIME,
+        connection_state TEXT NOT NULL DEFAULT 'offline'
     );
 
     -- 传感器数据表
@@ -168,6 +204,23 @@ def create_tables(conn: sqlite3.Connection):
         user_id     INTEGER REFERENCES users(id),
         timestamp   DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS device_commands (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        command_id      TEXT NOT NULL UNIQUE,
+        device_id       INTEGER NOT NULL REFERENCES devices(id),
+        action          TEXT NOT NULL,
+        params_json     TEXT NOT NULL,
+        status          TEXT NOT NULL CHECK (status IN ('pending', 'acknowledged', 'failed', 'timed_out')),
+        sent_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        acknowledged_at DATETIME,
+        response_json   TEXT,
+        error_code      TEXT,
+        attempt_count   INTEGER NOT NULL DEFAULT 1
+    );
+    CREATE INDEX IF NOT EXISTS idx_device_commands_device_sent
+        ON device_commands(device_id, sent_at);
+    CREATE INDEX IF NOT EXISTS idx_device_commands_status_sent
+        ON device_commands(status, sent_at);
     CREATE TABLE IF NOT EXISTS activity_log (
         id          INTEGER PRIMARY KEY AUTOINCREMENT,
         event_type  TEXT NOT NULL,

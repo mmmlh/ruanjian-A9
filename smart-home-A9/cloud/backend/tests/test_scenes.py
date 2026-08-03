@@ -8,6 +8,7 @@ from fastapi import HTTPException
 
 from app.api import scenes as scenes_api
 from app.database import init_db
+from app.main import on_mqtt_message
 import app.services.device_command as device_command_service
 
 
@@ -37,6 +38,14 @@ LEGACY_HOME_SCENE_ACTIONS = [
 
 HOME_SCENE_DESCRIPTION = "到家一键启用：全屋灯光、空调、窗帘和加湿器开启，门锁保持上锁"
 LEGACY_HOME_SCENE_DESCRIPTION = "到家一键开启：客厅灯亮 + 空调制冷 + 门禁解锁"
+
+
+def assert_command_messages(published, expected):
+    assert len(published) == len(expected)
+    for (topic, payload), (expected_topic, expected_payload) in zip(published, expected):
+        assert topic == expected_topic
+        assert payload.get("command_id")
+        assert {key: value for key, value in payload.items() if key != "command_id"} == expected_payload
 
 
 class TestScenes:
@@ -229,7 +238,7 @@ class TestScenes:
         assert detail.status_code == 200
         assert detail.json()["actions_json"] == actions_json
         assert executed.status_code == 200
-        assert published == [("home/livingroom/light/command", {"action": "on"})]
+        assert_command_messages(published, [("home/livingroom/light/command", {"action": "on"})])
 
     def test_scene_accepts_legacy_device_id_targets(self, client, auth_headers, monkeypatch):
         actions = [
@@ -266,13 +275,13 @@ class TestScenes:
         assert detail.status_code == 200
         assert detail.json()["actions_json"] == actions_json
         assert executed.status_code == 200
-        assert published == [
+        assert_command_messages(published, [
             ("home/livingroom/light/command", {"action": "set", "brightness": 30}),
             (
                 "home/livingroom/ac/command",
                 {"action": "set", "mode": "cool", "temperature": 25},
             ),
-        ]
+        ])
 
     def test_scene_ignores_user_supplied_internal_mqtt_topic(
         self,
@@ -310,7 +319,7 @@ class TestScenes:
         )
 
         assert response.status_code == 200
-        assert published == [("home/livingroom/light/command", {"action": "on"})]
+        assert_command_messages(published, [("home/livingroom/light/command", {"action": "on"})])
 
     def test_update_scene_rejects_invalid_actions(self, client, auth_headers):
         response = client.put(
@@ -413,6 +422,14 @@ class TestSceneCommandIntegration:
             headers=auth_headers,
         )
 
+        on_mqtt_message(
+            "home/livingroom/light/ack",
+            {
+                "command_id": published[0][1]["command_id"],
+                "success": True,
+                "state": {"power": "on", "brightness": 72},
+            },
+        )
         stored = json.loads(
             db.execute("SELECT status_json FROM devices WHERE id = 4").fetchone()[
                 "status_json"
@@ -422,9 +439,9 @@ class TestSceneCommandIntegration:
             "SELECT COUNT(*) FROM device_log WHERE device_id = 4"
         ).fetchone()[0]
         assert response.status_code == 200
-        assert published == [
+        assert_command_messages(published, [
             ("home/livingroom/light/command", {"action": "on", "brightness": 72})
-        ]
+        ])
         assert stored["power"] == "on"
         assert stored["brightness"] == 72
         assert after_logs == before_logs + 1
@@ -471,9 +488,9 @@ class TestSceneCommandIntegration:
 
         assert response.status_code == 200
         assert response.json()["executed"] == 1
-        assert published == [
+        assert_command_messages(published, [
             ("home/livingroom/light/command", {"action": "on", "brightness": 72})
-        ]
+        ])
 
     def test_unmapped_historical_scene_action_publishes_without_fake_state(
         self,
@@ -564,6 +581,14 @@ class TestSceneCommandIntegration:
             headers=auth_headers,
         )
 
+        on_mqtt_message(
+            "home/livingroom/light/ack",
+            {
+                "command_id": calls[0][1]["command_id"],
+                "success": True,
+                "state": {"power": "on", "brightness": 31},
+            },
+        )
         light_status = json.loads(
             db.execute("SELECT status_json FROM devices WHERE id = 4").fetchone()[
                 "status_json"
@@ -672,7 +697,7 @@ class TestScenePostDispatchFailures:
         def sequenced_get_db():
             nonlocal get_db_calls
             get_db_calls += 1
-            if get_db_calls == 1:
+            if get_db_calls <= 2:
                 return real_get_db()
             return FailingDatabaseContext()
 
@@ -694,6 +719,6 @@ class TestScenePostDispatchFailures:
             "executed": 1,
             "failed_index": 0,
         }
-        assert published == [
+        assert_command_messages(published, [
             ("home/livingroom/light/command", {"action": "on", "brightness": 52})
-        ]
+        ])

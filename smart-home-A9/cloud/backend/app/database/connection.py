@@ -5,16 +5,19 @@ import sqlite3
 from pathlib import Path
 from contextlib import contextmanager
 
-from app.config import DATABASE_URL
+from app.config import DATABASE_URL, SQLITE_JOURNAL_MODE
 
 # 从 DATABASE_URL 提取文件路径
 DB_PATH = DATABASE_URL.replace("sqlite:///", "")
 
 def get_connection() -> sqlite3.Connection:
-    """获取数据库连接（开启 WAL 模式 + 外键约束）"""
+    """获取数据库连接（使用配置的日志模式 + 外键约束）"""
     Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
-    conn.execute("PRAGMA journal_mode=WAL")
+    if SQLITE_JOURNAL_MODE not in {"WAL", "DELETE"}:
+        conn.close()
+        raise ValueError("SQLITE_JOURNAL_MODE must be WAL or DELETE")
+    conn.execute(f"PRAGMA journal_mode={SQLITE_JOURNAL_MODE}")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.row_factory = sqlite3.Row
     return conn

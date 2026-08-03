@@ -690,12 +690,110 @@ def test_rules_chip_builders_use_stable_tap_target_height():
         assert ".height(ControlCenterTheme.tapTarget)" in chip
 
 
+def test_selection_chip_builders_do_not_capture_active_booleans():
+    offenders = []
+    for path in PAGES.glob("*.ets"):
+        text = path.read_text(encoding="utf-8")
+        matches = re.findall(
+            r"@Builder\s+\w*Chip\([^)]*\bactive:\s*boolean",
+            text,
+        )
+        offenders.extend(f"{path.name}: {match}" for match in matches)
+
+    assert offenders == []
+
+
+def test_rules_selection_chips_read_their_reactive_selected_state():
+    text = source("RulesPage.ets")
+    tabs = braced_section(text, "@Builder buildRuleTabs()")
+    tab_chip = braced_section(text, "@Builder ruleTabChip")
+    choice_chip = braced_section(text, "@Builder buildChoiceChip")
+    choice_state = braced_section(text, "choiceActive(")
+    dialog = braced_section(text, "@Builder buildDialog()")
+
+    assert "this.ruleTabChip('全部', 0," in tabs
+    assert "this.ruleTabChip('已启用', 1," in tabs
+    assert "@Builder ruleTabChip(label: string, tabId: number," in tab_chip
+    assert "this.ruleTab === tabId ?" in tab_chip
+
+    assert "@Builder buildChoiceChip(label: string, group: string, value: string, field: string," in choice_chip
+    assert "this.choiceActive(group, value, field)" in choice_chip
+    assert "active: boolean" not in choice_chip
+    for state_check in [
+        "this.tr === value && this.fl === field",
+        "this.op === value",
+        "this.vl === value",
+        "this.targetId.toString() === value",
+        "this.an === value",
+    ]:
+        assert state_check in choice_state
+
+    for group in ["'trigger'", "'operator'", "'triggerValue'", "'target'", "'action'"]:
+        assert group in dialog
+
+
 def test_data_monitor_chip_builders_use_stable_tap_target_height():
     text = source("DataMonitorPage.ets")
 
     for marker in ["@Builder tabChip", "@Builder filterChip", "@Builder rangeChip"]:
         chip = braced_section(text, marker)
         assert ".height(ControlCenterTheme.tapTarget)" in chip
+
+
+def test_data_monitor_selection_chips_read_their_reactive_selected_state():
+    text = source("DataMonitorPage.ets")
+    tabs = braced_section(text, "@Builder buildTabs()")
+    history = braced_section(text, "@Builder buildHistoryPanel()")
+    tab_chip = braced_section(text, "@Builder tabChip")
+    filter_chip = braced_section(text, "@Builder filterChip")
+    range_chip = braced_section(text, "@Builder rangeChip")
+
+    for call in [
+        "this.tabChip('实时数据', 0,",
+        "this.tabChip('历史记录', 1,",
+        "this.tabChip('运行日志', 2,",
+    ]:
+        assert call in tabs
+    assert "@Builder tabChip(label: string, tabId: number," in tab_chip
+    assert "this.tab === tabId ?" in tab_chip
+
+    assert "this.filterChip('全部传感器', 0," in history
+    assert "this.filterChip(device.name, device.id," in history
+    assert "@Builder filterChip(label: string, deviceId: number," in filter_chip
+    assert "this.curId === deviceId ?" in filter_chip
+
+    assert "this.rangeChip('24小时', 24," in history
+    assert "this.rangeChip('7天', 168," in history
+    assert "@Builder rangeChip(label: string, hours: number," in range_chip
+    assert "this.historyHours === hours ?" in range_chip
+
+    for chip in [tab_chip, filter_chip, range_chip]:
+        assert "active: boolean" not in chip
+
+
+def test_data_monitor_keeps_cached_tab_content_mounted_during_refresh():
+    text = source("DataMonitorPage.ets")
+    history = braced_section(text, "@Builder buildHistoryPanel()")
+    logs = braced_section(text, "@Builder buildLogsPanel()")
+
+    assert "if (this.historyLoading && this.sdata.length === 0)" in history
+    assert "if (this.logsLoading && this.logs.length === 0)" in logs
+
+
+def test_dashboard_room_chips_read_the_reactive_selected_room_state():
+    text = source("DashboardPage.ets")
+    room_filter = braced_section(text, "@Builder buildRoomFilter()")
+    room_chip = braced_section(text, "@Builder roomChip")
+
+    assert "this.roomChip('全部', 0)" in room_filter
+    assert "this.roomChip(room.name, room.id)" in room_filter
+    assert "@Builder roomChip(label: string, roomId: number)" in room_chip
+    assert "active: boolean" not in room_chip
+    assert ".fontWeight(this.cur === roomId ?" in room_chip
+    assert ".fontColor(this.cur === roomId ?" in room_chip
+    assert ".backgroundColor(this.cur === roomId ?" in room_chip
+    assert ".border({ width: this.cur === roomId ?" in room_chip
+    assert ".onClick(() => { this.cur = roomId })" in room_chip
 
 
 def test_profile_password_disclosure_is_a_native_tap_target():

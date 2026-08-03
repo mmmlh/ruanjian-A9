@@ -1,7 +1,6 @@
 """
 空调控制器模拟器 — 支持多品牌（海尔/格力/美的）
 """
-import json
 import time
 from base_device import BaseDevice
 
@@ -45,12 +44,39 @@ class ACController(BaseDevice):
         # 空调不主动产生数据
         return None
 
+    def capabilities(self) -> dict:
+        return {
+            "actions": ["on", "off", "set"],
+            "params": {
+                "power": {"values": ["on", "off"]},
+                "mode": {"values": ["cool", "heat", "dehumidify", "fan_only", "auto"]},
+                "temp": {"min": 16, "max": 30},
+                "fan": {"values": ["auto", "low", "medium", "high"]},
+                "swing": {"values": ["on", "off"]},
+            },
+        }
+
+    def _state(self) -> dict:
+        return {"power": self.power, "mode": self.mode, "temp": self.temp, "fan": self.fan, "swing": self.swing}
+
     def handle_command(self, payload: dict):
         action = payload.get("action")
-
-        if action == "off":
+        values = self.capabilities()["params"]
+        updates = {key: payload[key] for key in ("power", "mode", "temp", "fan", "swing") if key in payload}
+        invalid = (
+            action not in {"on", "off", "set"}
+            or ("power" in updates and updates["power"] not in values["power"]["values"])
+            or ("mode" in updates and updates["mode"] not in values["mode"]["values"])
+            or ("fan" in updates and updates["fan"] not in values["fan"]["values"])
+            or ("swing" in updates and updates["swing"] not in values["swing"]["values"])
+            or ("temp" in updates and (not isinstance(updates["temp"], (int, float)) or not 16 <= updates["temp"] <= 30))
+        )
+        if invalid:
+            success, error_code = False, "INVALID_PARAMS" if action in {"on", "off", "set"} else "UNSUPPORTED_ACTION"
+        elif action == "off":
             self.power = "off"
-        elif action in ("on", "set"):
+            success, error_code = True, None
+        else:
             if "power" in payload:
                 self.power = payload["power"]
             elif action == "on":
@@ -63,22 +89,13 @@ class ACController(BaseDevice):
                 self.fan = payload["fan"]
             if "swing" in payload:
                 self.swing = payload["swing"]
+            success, error_code = True, None
 
-        # 翻译为品牌指令（用于日志/演示）
         brand_cmd = self._translate_to_brand()
-
-        status = {
-            "power": self.power,
-            "mode": self.mode,
-            "temp": self.temp,
-            "fan": self.fan,
-            "swing": self.swing,
-            "brand": self.brand,
-            "brand_command": brand_cmd,
-            "device_id": f"ac_{self.device_id:03d}",
-        }
-        self.publish_status(status)
-        self._publish_response(True, status)
+        state = self._state()
+        status = {**state, "brand": self.brand, "brand_command": brand_cmd, "device_id": f"ac_{self.device_id:03d}"}
+        self.publish_status(status, payload.get("command_id"))
+        self.publish_ack(payload, success, state, error_code)
 
     def _translate_to_brand(self) -> dict:
         """将当前状态翻译为品牌专属指令"""
@@ -91,12 +108,6 @@ class ACController(BaseDevice):
         result["fan"] = bm["fan"].get(self.fan, self.fan)
         result["temp"] = bm["temp"](self.temp) if callable(bm["temp"]) else self.temp
         return result
-
-    def _publish_response(self, success: bool, state: dict):
-        topic = f"{self.topic_base}/response"
-        resp = {"success": success, "state": state}
-        if self.client:
-            self.client.publish(topic, json.dumps(resp), qos=1)
 
     def _sleep(self):
         for _ in range(50):

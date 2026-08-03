@@ -853,9 +853,9 @@ struct DashboardPage {
 
       Scroll() {
         Row() {
-          this.roomChip('全部', this.cur === 0, () => { this.cur = 0 })
+          this.roomChip('全部', 0)
           ForEach(this.rooms, (room: Room) => {
-            this.roomChip(room.name, this.cur === room.id, () => { this.cur = room.id })
+            this.roomChip(room.name, room.id)
           }, (room: Room) => room.id.toString())
         }
       }
@@ -868,17 +868,17 @@ struct DashboardPage {
     .margin({ top: 20 })
   }
 
-  @Builder roomChip(label: string, active: boolean, action: () => void) {
+  @Builder roomChip(label: string, roomId: number) {
     Text(label)
       .fontSize(12)
-      .fontWeight(active ? FontWeight.Bold : FontWeight.Medium)
-      .fontColor(active ? ControlCenterTheme.textOnDark : ControlCenterTheme.textSecondary)
+      .fontWeight(this.cur === roomId ? FontWeight.Bold : FontWeight.Medium)
+      .fontColor(this.cur === roomId ? ControlCenterTheme.textOnDark : ControlCenterTheme.textSecondary)
       .padding({ left: 16, right: 16, top: 10, bottom: 10 })
       .borderRadius(ControlCenterTheme.radiusChip)
-      .backgroundColor(active ? ControlCenterTheme.accent : ControlCenterTheme.surface)
-      .border({ width: active ? 0 : 1, color: ControlCenterTheme.border })
+      .backgroundColor(this.cur === roomId ? ControlCenterTheme.accent : ControlCenterTheme.surface)
+      .border({ width: this.cur === roomId ? 0 : 1, color: ControlCenterTheme.border })
       .margin({ right: 8 })
-      .onClick(action)
+      .onClick(() => { this.cur = roomId })
   }
 
   @Builder buildDeviceGrid() {

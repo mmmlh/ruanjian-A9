@@ -1,17 +1,20 @@
 import json
 import threading
+import uuid
 from typing import Any
 
 from fastapi import HTTPException
 
 from app.database.connection import get_db
-from app.services.device_state_projection import refresh_device_state
 from app.services.entity_state import build_state, parse_entity_id
 from app.services.mqtt_client import publish_message
 from app.services.security import aes_decrypt
 
 
 SUPPORTED_ACTIONS_BY_DEVICE_TYPE: dict[str, tuple[str, ...]] = {
+    "temperature_sensor": ("set_config",),
+    "humidity_sensor": ("set_config",),
+    "pir_sensor": ("set_config",),
     "light": ("on", "off", "set"),
     "ac": ("on", "off", "set"),
     "door_lock": ("unlock", "lock"),
@@ -29,6 +32,9 @@ ACTION_ALIASES_BY_DEVICE_TYPE: dict[str, dict[str, str]] = {
 }
 
 PARAMETER_RANGES_BY_DEVICE_TYPE: dict[str, dict[str, tuple[float, float]]] = {
+    "temperature_sensor": {"sample_interval_seconds": (1, 3600), "calibration": (-10, 10)},
+    "humidity_sensor": {"sample_interval_seconds": (1, 3600), "calibration": (-20, 20)},
+    "pir_sensor": {"detection_interval_seconds": (1, 300)},
     "light": {"brightness": (0, 100)},
     "ac": {"temp": (16, 30)},
     "curtain": {"position": (0, 100)},
@@ -96,6 +102,53 @@ def normalize_and_validate_command(
         raise HTTPException(status_code=400, detail="invalid_command_params") from exc
 
     return canonical_action, normalized_params
+
+
+def validate_declared_capabilities(
+    capabilities_json: str | None,
+    action: str,
+    params: dict[str, Any],
+) -> None:
+    try:
+        capabilities = json.loads(capabilities_json or "{}")
+    except (TypeError, json.JSONDecodeError):
+        return
+    if not isinstance(capabilities, dict):
+        return
+    actions = capabilities.get("actions")
+    if isinstance(actions, list) and actions and action not in actions:
+        raise HTTPException(status_code=400, detail="unsupported_device_action")
+    parameter_specs = capabilities.get("params")
+    if not isinstance(parameter_specs, dict):
+        return
+
+    for name, spec in parameter_specs.items():
+        if not isinstance(spec, dict):
+            continue
+        required_for = spec.get("required_for")
+        if isinstance(required_for, list) and action in required_for and name not in params:
+            raise HTTPException(status_code=400, detail="invalid_command_params")
+
+    for name, value in params.items():
+        spec = parameter_specs.get(name)
+        if not isinstance(spec, dict):
+            raise HTTPException(status_code=400, detail="invalid_command_params")
+        allowed_values = spec.get("values")
+        if isinstance(allowed_values, list) and value not in allowed_values:
+            raise HTTPException(status_code=400, detail="invalid_command_params")
+        minimum_length = spec.get("min_length")
+        if minimum_length is not None:
+            if not isinstance(value, str) or len(value) < minimum_length:
+                raise HTTPException(status_code=400, detail="invalid_command_params")
+        minimum = spec.get("min")
+        maximum = spec.get("max")
+        if minimum is not None or maximum is not None:
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise HTTPException(status_code=400, detail="invalid_command_params")
+            if minimum is not None and value < minimum:
+                raise HTTPException(status_code=400, detail="invalid_command_params")
+            if maximum is not None and value > maximum:
+                raise HTTPException(status_code=400, detail="invalid_command_params")
 
 
 def decode_command_payload(action: str, params: Any, user: dict | None) -> tuple[str, Any]:
@@ -199,34 +252,40 @@ def _dispatch_and_persist_command(
     device: dict[str, Any],
     action: str,
     params: dict[str, Any],
-    payload: dict[str, Any],
     user: dict | None,
-) -> tuple[str, Any]:
+) -> tuple[str, str, Any, dict[str, Any]]:
     device_id = device["id"]
     topic = device["mqtt_topic"] + "/command"
+    command_id = str(uuid.uuid4())
+    payload = {**params, "action": action, "command_id": command_id}
 
     with _get_device_command_lock(device_id):
         try:
+            with get_db() as conn:
+                conn.execute(
+                    "UPDATE device_commands SET status = 'timed_out', error_code = 'ACK_TIMEOUT' "
+                    "WHERE status = 'pending' AND sent_at <= datetime('now', '-15 seconds')"
+                )
+                conn.execute(
+                    "INSERT INTO device_commands (command_id, device_id, action, params_json, status) "
+                    "VALUES (?, ?, ?, ?, 'pending')",
+                    (command_id, device_id, action, json.dumps(params)),
+                )
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="command_persistence_failed") from exc
+        try:
             publish_message(topic, json.dumps(payload))
         except Exception as exc:
+            with get_db() as conn:
+                conn.execute(
+                    "UPDATE device_commands SET status = 'failed', error_code = 'DISPATCH_FAILED' "
+                    "WHERE command_id = ?",
+                    (command_id,),
+                )
             raise HTTPException(status_code=502, detail="command_dispatch_failed") from exc
 
         try:
             with get_db() as conn:
-                conn.execute("BEGIN IMMEDIATE")
-                current = conn.execute(
-                    "SELECT status_json FROM devices WHERE id = ?",
-                    (device_id,),
-                ).fetchone()
-                if current is None:
-                    raise RuntimeError("device_missing_after_dispatch")
-                current_status = json.loads(current["status_json"] or "{}")
-                next_status = apply_command_to_status(
-                    device["type"],
-                    current_status,
-                    action,
-                    params,
-                )
                 conn.execute(
                     "INSERT INTO device_log (device_id, action, detail, user_id) VALUES (?, ?, ?, ?)",
                     (
@@ -236,10 +295,6 @@ def _dispatch_and_persist_command(
                         int(user["sub"]) if user is not None else None,
                     ),
                 )
-                conn.execute(
-                    "UPDATE devices SET status_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (json.dumps(next_status), device_id),
-                )
                 updated = conn.execute(
                     "SELECT d.*, r.name as room_name FROM devices d JOIN rooms r ON d.room_id = r.id WHERE d.id = ?",
                     (device_id,),
@@ -247,7 +302,7 @@ def _dispatch_and_persist_command(
         except Exception as exc:
             raise CommandPostDispatchError(topic, action) from exc
 
-    return topic, updated
+    return topic, command_id, updated, payload
 
 
 def execute_device_command(
@@ -275,19 +330,15 @@ def execute_device_command(
             decoded_action,
             decoded_params,
         )
-        payload = {**actual_params, "action": actual_action}
-
-    topic, updated = _dispatch_and_persist_command(
+        validate_declared_capabilities(
+            device.get("capabilities_json"), actual_action, actual_params
+        )
+    topic, command_id, updated, payload = _dispatch_and_persist_command(
         device,
         actual_action,
         actual_params,
-        payload,
         user,
     )
-    try:
-        refresh_device_state(device_id)
-    except Exception as exc:
-        raise CommandPostDispatchError(topic, actual_action) from exc
 
     return {
         "device_id": device_id,
@@ -296,6 +347,8 @@ def execute_device_command(
         "payload": payload,
         "topic": topic,
         "changed_state": build_state(dict(updated)) if updated else None,
+        "command_id": command_id,
+        "command_status": "pending",
         "message": f"已下发“{actual_action}”指令",
     }
 

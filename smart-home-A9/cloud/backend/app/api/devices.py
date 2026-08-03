@@ -1,6 +1,7 @@
 """
 Device management plus legacy command endpoint.
 """
+import json
 import sqlite3
 from typing import Any, Optional
 
@@ -45,6 +46,24 @@ class DeviceCreate(BaseModel):
 class CommandRequest(BaseModel):
     action: str
     params: Optional[dict[str, Any]] = None
+
+
+@router.get("/commands/{command_id}")
+def get_command_status(command_id: str, user: dict = Depends(get_current_user)):
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT command_id, device_id, action, params_json, status, sent_at, acknowledged_at, "
+            "response_json, error_code FROM device_commands WHERE command_id = ?",
+            (command_id,),
+        ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="command_not_found")
+
+    command = dict(row)
+    command["params"] = json.loads(command.pop("params_json"))
+    response_json = command.pop("response_json")
+    command["response"] = json.loads(response_json) if response_json else None
+    return command
 
 
 @router.get("")
@@ -99,6 +118,8 @@ def send_command(device_id: int, req: CommandRequest, user: dict = Depends(get_c
         "topic": result["topic"],
         "payload": result["payload"],
         "changed_state": result["changed_state"],
+        "command_id": result["command_id"],
+        "command_status": result["command_status"],
     }
 
 

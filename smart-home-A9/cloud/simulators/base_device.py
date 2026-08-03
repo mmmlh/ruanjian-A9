@@ -25,12 +25,18 @@ class BaseDevice(ABC):
         self.client: mqtt.Client | None = None
         self.running = False
         self._thread: threading.Thread | None = None
+        self.hardware_id = f"sim-{device_type}-{device_id:03d}"
+        self.protocol_version = "1.0"
+        self._last_heartbeat = 0.0
 
         # MQTT 主题
         self.topic_base = f"home/{room_id}/{device_type}"
         self.topic_command = f"{self.topic_base}/command"
         self.topic_status = f"{self.topic_base}/status"
         self.topic_sensor = f"{self.topic_base}/sensor"
+        self.topic_hello = f"{self.topic_base}/hello"
+        self.topic_heartbeat = f"{self.topic_base}/heartbeat"
+        self.topic_ack = f"{self.topic_base}/ack"
 
     def connect_mqtt(self):
         """连接 MQTT Broker"""
@@ -48,6 +54,7 @@ class BaseDevice(ABC):
         if rc == 0:
             client.subscribe(self.topic_command)
             logger.info(f"[{self}] 订阅指令主题: {self.topic_command}")
+            self.publish_hello()
 
     def _on_message(self, client, userdata, msg):
         try:
@@ -67,15 +74,56 @@ class BaseDevice(ABC):
         """生成模拟数据 — 子类实现"""
         pass
 
-    def publish_status(self, status: dict):
+    def publish_status(self, status: dict, command_id: str | None = None):
         """发布设备状态"""
         if self.client:
-            self.client.publish(self.topic_status, json.dumps(status), qos=1)
+            message = dict(status)
+            if isinstance(command_id, str) and command_id:
+                message["command_id"] = command_id
+            self.client.publish(self.topic_status, json.dumps(message), qos=1)
 
     def publish_sensor_data(self, data: dict):
         """发布传感器数据"""
         if self.client:
             self.client.publish(self.topic_sensor, json.dumps(data), qos=1)
+
+    def capabilities(self) -> dict:
+        return {"actions": [], "params": {}}
+
+    def publish_hello(self):
+        if self.client:
+            self.client.publish(
+                self.topic_hello,
+                json.dumps(
+                    {
+                        "hardware_id": self.hardware_id,
+                        "protocol_version": self.protocol_version,
+                        "capabilities": self.capabilities(),
+                    }
+                ),
+                qos=1,
+                retain=True,
+            )
+
+    def publish_heartbeat(self):
+        if self.client:
+            # Reannounce identity so a restarted backend can re-register this device.
+            self.publish_hello()
+            self.client.publish(
+                self.topic_heartbeat,
+                json.dumps({"hardware_id": self.hardware_id, "ts": int(time.time())}),
+                qos=1,
+            )
+
+    def publish_ack(self, payload: dict, success: bool, state: dict, error_code: str | None = None):
+        command_id = payload.get("command_id")
+        if not isinstance(command_id, str) or not command_id:
+            return
+        message = {"command_id": command_id, "success": success, "state": dict(state)}
+        if error_code:
+            message["error_code"] = error_code
+        if self.client:
+            self.client.publish(self.topic_ack, json.dumps(message), qos=1)
 
     def start(self):
         """启动设备模拟（在独立线程中）"""
@@ -89,6 +137,9 @@ class BaseDevice(ABC):
         """模拟主循环"""
         while self.running:
             try:
+                if time.time() - self._last_heartbeat >= 30:
+                    self.publish_heartbeat()
+                    self._last_heartbeat = time.time()
                 data = self.generate_data()
                 if data:
                     self.publish_sensor_data(data)

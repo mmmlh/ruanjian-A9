@@ -189,6 +189,8 @@ export class ServiceCallResult {
   message: string = ''
   entity_id: string = ''
   action: string = ''
+  command_id: string = ''
+  command_status: string = ''
   changed_states: HAEntityState[] = []
   service_response: Record<string, Object> = {}
   executed_at: string = ''

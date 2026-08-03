@@ -69,3 +69,18 @@ def test_crypto_util_handles_sym_key_generation_exceptions_for_arkts_compiler():
     assert "cryptoFramework.createSymKeyGenerator('AES256')" in create_sym_key
     assert "await keyGenerator.convertKey(keyBlob)" in create_sym_key
     assert "throw err" in create_sym_key or "throw new Error(" in create_sym_key
+
+
+def test_remote_page_waits_for_mqtt_command_acknowledgement_before_refreshing_state():
+    api_client = _source(ROOT / "openharmony/entry/src/main/ets/common/ApiClient.ets")
+    model = _source(ROOT / "openharmony/entry/src/main/ets/model/DeviceModel.ets")
+    remote = _source(DEVICE_REMOTE_PAGE)
+
+    assert "command_id: string = ''" in model
+    assert "command_status: string = ''" in model
+    assert "export async function getCommandStatus(commandId: string)" in api_client
+    assert "serviceResult.command_id = readString(result, 'command_id')" in api_client
+    assert "serviceResult.command_status = readString(result, 'command_status')" in api_client
+    assert "this.waitForCommandAcknowledgement(result.command_id)" in remote
+    assert "getCommandStatus(commandId)" in remote
+    assert "commandStatus === 'acknowledged'" in remote

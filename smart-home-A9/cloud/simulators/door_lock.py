@@ -1,7 +1,6 @@
 """
 智能门禁控制器模拟器 — 远程开锁/上锁
 """
-import json
 import time
 from base_device import BaseDevice
 
@@ -16,35 +15,36 @@ class DoorLock(BaseDevice):
         # 门禁不主动产生数据
         return None
 
+    def capabilities(self) -> dict:
+        return {
+            "actions": ["unlock", "lock"],
+            "params": {"auth_code": {"min_length": 16, "required_for": ["unlock"]}},
+        }
+
     def handle_command(self, payload: dict):
         action = payload.get("action")
 
         if action == "unlock":
             auth_code = payload.get("auth_code", "")
-            # 简单验证（实际项目中应验证 AES 加密的认证码）
-            if auth_code:
+            if isinstance(auth_code, str) and len(auth_code) >= 16:
                 self.locked = False
                 success = True
+                error_code = None
             else:
                 success = False
+                error_code = "AUTH_FAILED"
         elif action == "lock":
             self.locked = True
             success = True
+            error_code = None
         else:
             success = False
+            error_code = "UNSUPPORTED_ACTION"
 
-        status = {
-            "locked": self.locked,
-            "device_id": f"door_{self.device_id:03d}",
-        }
-        self.publish_status(status)
-        self._publish_response(success, status)
-
-    def _publish_response(self, success: bool, state: dict):
-        topic = f"{self.topic_base}/response"
-        resp = {"success": success, "state": state}
-        if self.client:
-            self.client.publish(topic, json.dumps(resp), qos=1)
+        state = {"locked": self.locked}
+        status = {**state, "device_id": f"door_{self.device_id:03d}"}
+        self.publish_status(status, payload.get("command_id"))
+        self.publish_ack(payload, success, state, error_code)
 
     def _sleep(self):
         for _ in range(50):

@@ -120,8 +120,11 @@ class TestDashboardContract:
     ):
         stale = "2000-01-01 00:00:00"
         fresh = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-        db.execute("UPDATE devices SET updated_at = ?", (stale,))
-        db.execute("UPDATE devices SET updated_at = ? WHERE id IN (4, 5)", (fresh,))
+        db.execute("UPDATE devices SET last_seen_at = ?, connection_state = 'offline'", (stale,))
+        db.execute(
+            "UPDATE devices SET last_seen_at = ?, connection_state = 'online' WHERE id IN (4, 5)",
+            (fresh,),
+        )
         db.commit()
 
         response = client.get("/api/dashboard/summary", headers=auth_headers)
@@ -147,9 +150,15 @@ class TestDashboardContract:
         stale = "2000-01-01 00:00:00"
         future = "2999-01-01 00:00:00"
         fresh = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-        db.execute("UPDATE devices SET updated_at = ?", (stale,))
-        db.execute("UPDATE devices SET updated_at = ? WHERE id = 4", (future,))
-        db.execute("UPDATE devices SET updated_at = ? WHERE id = 5", (fresh,))
+        db.execute("UPDATE devices SET last_seen_at = ?, connection_state = 'offline'", (stale,))
+        db.execute(
+            "UPDATE devices SET last_seen_at = ?, connection_state = 'online' WHERE id = 4",
+            (future,),
+        )
+        db.execute(
+            "UPDATE devices SET last_seen_at = ?, connection_state = 'online' WHERE id = 5",
+            (fresh,),
+        )
         db.commit()
 
         response = client.get("/api/dashboard/summary", headers=auth_headers)

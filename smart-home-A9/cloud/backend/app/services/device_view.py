@@ -133,9 +133,12 @@ def present_device(
 ) -> dict[str, Any]:
     presented = dict(device)
     status = load_device_status(presented)
-    last_seen_source = presented.get("updated_at") or presented.get("created_at")
+    last_seen_source = presented.get("last_seen_at")
 
-    presented["online"] = is_device_online(last_seen_source, now=now)
+    presented["online"] = (
+        presented.get("connection_state") == "online"
+        and is_device_online(last_seen_source, now=now)
+    )
     presented["status_summary"] = summarize_device_status(str(presented.get("type", "")), status)
     presented["last_seen_at"] = format_last_seen_at(last_seen_source, now=now)
 
