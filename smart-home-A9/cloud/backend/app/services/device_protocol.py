@@ -20,6 +20,13 @@ def topic_root(topic: str) -> str | None:
     return "/".join(parts[:3])
 
 
+def discovery_topic_details(topic: str) -> tuple[str, str, str] | None:
+    parts = topic.split("/")
+    if len(parts) != 4 or parts[0] != "home" or not parts[1] or not parts[2]:
+        return None
+    return "/".join(parts[:3]), parts[1], parts[2]
+
+
 def _safe_json(value: Any) -> str | None:
     try:
         return json.dumps(value, ensure_ascii=False, allow_nan=False)
@@ -38,6 +45,48 @@ def _mark_present(conn, mqtt_topic: str) -> int | None:
         (row["id"],),
     )
     return int(row["id"])
+
+
+def _record_discovery_hello(conn, topic: str, payload: Mapping[str, Any]) -> bool:
+    details = discovery_topic_details(topic)
+    hardware_id = payload.get("hardware_id")
+    protocol_version = payload.get("protocol_version")
+    capabilities = payload.get("capabilities")
+    if (
+        details is None
+        or not isinstance(hardware_id, str)
+        or not hardware_id.strip()
+        or not isinstance(protocol_version, str)
+        or not protocol_version.strip()
+        or not isinstance(capabilities, Mapping)
+    ):
+        return False
+    capabilities_json = _safe_json(dict(capabilities))
+    if capabilities_json is None:
+        return False
+
+    mqtt_topic, room_hint, device_type = details
+    hardware_id = hardware_id.strip()
+    conn.execute(
+        "DELETE FROM discovered_devices WHERE mqtt_topic = ? AND hardware_id != ?",
+        (mqtt_topic, hardware_id),
+    )
+    conn.execute(
+        """
+        INSERT INTO discovered_devices
+            (hardware_id, mqtt_topic, room_hint, device_type, protocol_version, capabilities_json)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(hardware_id) DO UPDATE SET
+            mqtt_topic = excluded.mqtt_topic,
+            room_hint = excluded.room_hint,
+            device_type = excluded.device_type,
+            protocol_version = excluded.protocol_version,
+            capabilities_json = excluded.capabilities_json,
+            last_seen_at = CURRENT_TIMESTAMP
+        """,
+        (hardware_id, mqtt_topic, room_hint, device_type, protocol_version.strip(), capabilities_json),
+    )
+    return True
 
 
 def record_hello(topic: str, payload: Mapping[str, Any]) -> int | None:
@@ -59,11 +108,12 @@ def record_hello(topic: str, payload: Mapping[str, Any]) -> int | None:
         return None
 
     with get_db() as conn:
+        if not _record_discovery_hello(conn, topic, payload):
+            return None
         row = conn.execute(
             "SELECT id, hardware_id FROM devices WHERE mqtt_topic = ?", (mqtt_topic,)
         ).fetchone()
         if row is None:
-            logger.warning("ignored hello from unregistered device topic %s", mqtt_topic)
             return None
         registered_hardware_id = row["hardware_id"]
         if registered_hardware_id and registered_hardware_id != hardware_id:
@@ -83,6 +133,14 @@ def record_heartbeat(topic: str, payload: Mapping[str, Any]) -> int | None:
     if mqtt_topic is None or not isinstance(hardware_id, str) or not hardware_id.strip():
         return None
     with get_db() as conn:
+        conn.execute(
+            """
+            UPDATE discovered_devices
+            SET last_seen_at = CURRENT_TIMESTAMP
+            WHERE hardware_id = ? AND mqtt_topic = ?
+            """,
+            (hardware_id.strip(), mqtt_topic),
+        )
         row = conn.execute(
             "SELECT id, hardware_id FROM devices WHERE mqtt_topic = ?", (mqtt_topic,)
         ).fetchone()

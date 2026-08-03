@@ -85,6 +85,8 @@ def _mode_label(value: Any) -> str:
 
 
 def summarize_device_status(device_type: str, status: Mapping[str, Any]) -> str:
+    if not status:
+        return "暂无状态"
     if device_type in {"light", "smart_plug"}:
         return "已开启" if status.get("power") == "on" else "已关闭"
     if device_type == "ac":

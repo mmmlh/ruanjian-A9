@@ -495,6 +495,19 @@ def test_device_discovery_ignores_duplicate_scan_requests():
     assert scan.index("if (this.scanning)") < scan.index("this.scanning = true")
 
 
+def test_device_discovery_identifies_real_hardware_and_clears_stale_results():
+    page = source("DeviceManagePage.ets")
+    model = (ROOT / "openharmony/entry/src/main/ets/model/DeviceModel.ets").read_text(encoding="utf-8")
+    api_client = (COMMON / "ApiClient.ets").read_text(encoding="utf-8")
+    scan = braced_section(page, "async scanCandidates")
+
+    assert "hardware_id: string = ''" in model
+    assert "device.hardware_id = readString(record, 'hardware_id')" in api_client
+    assert "Text('设备标识：' + candidate.hardware_id)" in page
+    assert scan.index("this.err = ''") < scan.index("this.scanning = true")
+    assert "this.discovered = []" in scan
+
+
 def test_device_delete_dismisses_confirmation_before_async_request():
     text = source("DeviceManagePage.ets")
     delete_flow = braced_section(text, "async doDel")

@@ -108,12 +108,15 @@ export class WSMessage {
 
 export class DiscoveredDevice {
   id: string = ''
+  hardware_id: string = ''
   room: string = ''
   room_hint: string = ''
   type: string = ''
   name: string = ''
   brand: string = ''
   mqtt_topic: string = ''
+  protocol_version: string = ''
+  capabilities: Record<string, Object> = {}
   status: Record<string, Object> = {}
   status_summary: string = ''
   last_seen_at: string = ''

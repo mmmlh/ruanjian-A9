@@ -15,6 +15,17 @@ from app.main import on_mqtt_message
 from app.services.rule_engine import rule_engine
 
 
+DISCOVERY_HELLO = {
+    "hardware_id": "test-discovery-light-001",
+    "protocol_version": "1.0",
+    "capabilities": {"actions": ["on", "off", "set"], "params": {}},
+}
+
+
+def announce_discovered_light():
+    on_mqtt_message("home/test-discovery/light/hello", DISCOVERY_HELLO)
+
+
 class TestDevices:
     def test_init_db_migrates_legacy_devices_table_to_add_updated_at(self):
         from app.database.connection import DB_PATH, init_db
@@ -139,7 +150,7 @@ class TestDevices:
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == {}
-        assert data["status_summary"] == "已关闭"
+        assert data["status_summary"] == "暂无状态"
 
     def test_device_detail_tolerates_non_mapping_status_json(self, client, auth_headers, db):
         db.execute("UPDATE devices SET status_json = ? WHERE id = 4", ('["unexpected"]',))
@@ -150,7 +161,7 @@ class TestDevices:
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == {}
-        assert data["status_summary"] == "已关闭"
+        assert data["status_summary"] == "暂无状态"
 
     def test_get_device_not_found(self, client, auth_headers):
         response = client.get("/api/devices/999", headers=auth_headers)
@@ -684,10 +695,8 @@ class TestDevices:
         assert payload["executed_at"].strip()
         assert "T" in payload["executed_at"]
 
-    def test_bind_device_response_contains_room_name_and_status_summary(self, client, auth_headers, db, monkeypatch):
-        from app.api import discovery as discovery_api
-
-        monkeypatch.setattr(discovery_api, "ROOMS", ["livingroom", "bedroom", "study"])
+    def test_bind_device_response_contains_room_name_and_status_summary(self, client, auth_headers, db):
+        announce_discovered_light()
         candidate = client.post("/api/discovery", headers=auth_headers).json()["discovered"][0]
 
         response = client.post(
@@ -701,7 +710,7 @@ class TestDevices:
             payload = response.json()
             assert isinstance(payload["device"]["room_name"], str)
             assert payload["device"]["room_name"].strip()
-            assert payload["device"]["status_summary"] == "已关闭"
+            assert payload["device"]["status_summary"] == "暂无状态"
             assert payload["message"] == f"设备“Guest Lamp”已绑定到“{payload['device']['room_name']}”"
             assert "T" in payload["device"]["last_seen_at"]
             assert payload["device"]["last_seen_at"].endswith("+00:00")
@@ -1563,12 +1572,10 @@ class TestDeviceLifecycleProjection:
         self,
         client,
         auth_headers,
-        monkeypatch,
     ):
-        from app.api import discovery as discovery_api
         from app.services.device_state_projection import device_state_projection
 
-        monkeypatch.setattr(discovery_api, "ROOMS", ["livingroom", "bedroom", "study"])
+        announce_discovered_light()
         candidate = client.post(
             "/api/discovery",
             headers=auth_headers,
@@ -1717,9 +1724,7 @@ class TestDeviceLifecycleProjection:
         db,
         monkeypatch,
     ):
-        from app.api import discovery as discovery_api
-
-        monkeypatch.setattr(discovery_api, "ROOMS", ["livingroom", "bedroom", "study"])
+        announce_discovered_light()
         candidate = client.post(
             "/api/discovery",
             headers=auth_headers,

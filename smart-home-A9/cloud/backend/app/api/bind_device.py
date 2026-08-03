@@ -6,7 +6,6 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app.api import discovery as discovery_api
 from app.api.auth import get_current_user
 from app.database.connection import get_connection
 from app.services.discovery_catalog import (
@@ -57,7 +56,6 @@ def bind_device(req: BindDeviceRequest, user: dict = Depends(get_current_user)):
             req.device_id,
             req.room_id,
             req.name,
-            allowed_rooms=discovery_api.get_allowed_candidate_rooms(),
         )
         conn.commit()
     except CandidateNotFoundError as exc:

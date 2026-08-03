@@ -187,16 +187,19 @@ function mapRule(record: Record<string, Object>): AutomationRule {
 function mapDiscoveredDevice(record: Record<string, Object>): DiscoveredDevice {
   let device = new DiscoveredDevice()
   device.id = readString(record, 'id')
+  device.hardware_id = readString(record, 'hardware_id')
   device.room = readString(record, 'room')
   device.room_hint = readString(record, 'room_hint')
   device.type = readString(record, 'type')
   device.name = readString(record, 'name')
   device.brand = readString(record, 'brand')
   device.mqtt_topic = readString(record, 'mqtt_topic')
+  device.protocol_version = readString(record, 'protocol_version')
+  device.capabilities = readObject(record, 'capabilities')
   device.status = readObject(record, 'status')
   device.status_summary = readString(record, 'status_summary')
   device.last_seen_at = readString(record, 'last_seen_at')
-  device.online = readBoolean(record, 'online', true)
+  device.online = readBoolean(record, 'online', false)
   return device
 }
 

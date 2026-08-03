@@ -183,6 +183,19 @@ def create_tables(conn: sqlite3.Connection):
         connection_state TEXT NOT NULL DEFAULT 'offline'
     );
 
+    CREATE TABLE IF NOT EXISTS discovered_devices (
+        hardware_id       TEXT PRIMARY KEY,
+        mqtt_topic        TEXT NOT NULL UNIQUE,
+        room_hint         TEXT NOT NULL,
+        device_type       TEXT NOT NULL,
+        protocol_version  TEXT NOT NULL,
+        capabilities_json TEXT NOT NULL,
+        first_seen_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        last_seen_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_discovered_devices_last_seen
+        ON discovered_devices(last_seen_at);
+
     -- 传感器数据表
     CREATE TABLE IF NOT EXISTS sensor_data (
         id          INTEGER PRIMARY KEY AUTOINCREMENT,

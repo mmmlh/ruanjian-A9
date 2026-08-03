@@ -146,6 +146,8 @@ struct DeviceManagePage {
     if (this.scanning) {
       return
     }
+    this.err = ''
+    this.ok = ''
     this.scanning = true
     try {
       this.discovered = await discoverDevices()
@@ -153,6 +155,7 @@ struct DeviceManagePage {
         this.ok = this.discovered.length > 0 ? '候选设备列表已刷新' : '暂未发现新的候选设备'
       }
     } catch (err) {
+      this.discovered = []
       this.err = localizeMessage((err as Error).message, '扫描候选设备失败')
     } finally {
       this.scanning = false
@@ -498,6 +501,10 @@ struct DeviceManagePage {
                           Text(DeviceHelper.typeLabel(candidate.type) + ' · ' + DeviceHelper.roomLabel(candidate))
                             .fontSize(12)
                             .fontColor(ControlCenterTheme.textSecondary)
+                            .margin({ top: ControlCenterTheme.spaceXs })
+                          Text('设备标识：' + candidate.hardware_id)
+                            .fontSize(11)
+                            .fontColor(ControlCenterTheme.textTertiary)
                             .margin({ top: ControlCenterTheme.spaceXs })
                         }
                         .layoutWeight(1)

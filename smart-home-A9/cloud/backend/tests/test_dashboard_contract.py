@@ -1,17 +1,27 @@
 """
 Dashboard and discovery contract tests for the real-functionality plan.
 """
+import json
 from datetime import datetime
 
-from app.api import discovery as discovery_api
+from app.main import on_mqtt_message
 
 
 class TestDashboardContract:
-    def _restrict_discovery_to_seeded_rooms(self, monkeypatch):
-        monkeypatch.setattr(discovery_api, "ROOMS", ["livingroom", "bedroom", "study"])
+    HELLO = {
+        "hardware_id": "lab-light-001",
+        "protocol_version": "1.0",
+        "capabilities": {
+            "actions": ["on", "off", "set"],
+            "params": {"brightness": {"min": 0, "max": 100}},
+        },
+    }
 
-    def test_discovery_returns_candidates_without_creating_real_devices(self, client, auth_headers, db, monkeypatch):
-        self._restrict_discovery_to_seeded_rooms(monkeypatch)
+    @classmethod
+    def _announce_unbound_light(cls):
+        on_mqtt_message("home/lab/light/hello", cls.HELLO)
+
+    def test_discovery_returns_recent_mqtt_announcements_without_creating_devices(self, client, auth_headers, db):
         before = [
             (row["id"], row["mqtt_topic"], row["status_json"])
             for row in db.execute(
@@ -19,6 +29,7 @@ class TestDashboardContract:
             ).fetchall()
         ]
 
+        self._announce_unbound_light()
         response = client.post("/api/discovery", headers=auth_headers)
 
         assert response.status_code == 200
@@ -33,31 +44,45 @@ class TestDashboardContract:
         assert "discovered" in payload
         assert isinstance(payload["discovered"], list)
         assert payload["mutates_devices"] is False
+        assert payload["source"] == "mqtt_announcements"
+        assert [item["hardware_id"] for item in payload["discovered"]] == ["lab-light-001"]
         assert after == before
 
-    def test_discovery_returns_candidate_status_summary_and_last_seen(self, client, auth_headers, monkeypatch):
-        self._restrict_discovery_to_seeded_rooms(monkeypatch)
+    def test_discovery_returns_real_identity_capabilities_and_last_seen(self, client, auth_headers):
+        self._announce_unbound_light()
 
         response = client.post("/api/discovery", headers=auth_headers)
 
         assert response.status_code == 200
         payload = response.json()
-        assert payload["source"] == "candidate_catalog"
+        assert payload["source"] == "mqtt_announcements"
         assert isinstance(payload["discovered"], list)
         candidate = payload["discovered"][0]
-        assert "status" in candidate
-        assert "status_summary" in candidate
+        assert candidate["id"] == "lab-light-001"
+        assert candidate["hardware_id"] == "lab-light-001"
+        assert candidate["mqtt_topic"] == "home/lab/light"
+        assert candidate["type"] == "light"
+        assert candidate["room"] == "lab"
+        assert candidate["capabilities"]["actions"] == ["on", "off", "set"]
         assert "last_seen_at" in candidate
-        assert candidate["room_hint"] == "客厅"
-        assert candidate["name"] == "客厅氛围灯"
-        assert candidate["status_summary"] == "已关闭"
-        assert isinstance(candidate["status_summary"], str)
-        assert candidate["status_summary"].strip()
         parsed = datetime.fromisoformat(candidate["last_seen_at"].replace("Z", "+00:00"))
         assert parsed.tzinfo is not None
 
-    def test_bind_device_creates_bound_device_from_candidate(self, client, auth_headers, db, monkeypatch):
-        self._restrict_discovery_to_seeded_rooms(monkeypatch)
+    def test_discovery_excludes_stale_mqtt_announcements(self, client, auth_headers, db):
+        self._announce_unbound_light()
+        db.execute(
+            "UPDATE discovered_devices SET last_seen_at = '2000-01-01 00:00:00' "
+            "WHERE hardware_id = 'lab-light-001'"
+        )
+        db.commit()
+
+        response = client.post("/api/discovery", headers=auth_headers)
+
+        assert response.status_code == 200
+        assert response.json()["discovered"] == []
+
+    def test_bind_device_creates_device_from_recent_mqtt_announcement(self, client, auth_headers, db):
+        self._announce_unbound_light()
         discovery = client.post("/api/discovery", headers=auth_headers)
         assert discovery.status_code == 200
         discovered = discovery.json()["discovered"]
@@ -78,6 +103,10 @@ class TestDashboardContract:
             assert payload["success"] is True
             assert payload["device"]["room_id"] == 1
             assert payload["device"]["name"] == "Guest Lamp"
+            assert payload["device"]["hardware_id"] == "lab-light-001"
+            assert payload["device"]["mqtt_topic"] == "home/lab/light"
+            assert json.loads(payload["device"]["capabilities_json"])["actions"] == ["on", "off", "set"]
+            assert payload["device"]["status_summary"] == "暂无状态"
             assert payload["message"] == f"设备“Guest Lamp”已绑定到“{payload['device']['room_name']}”"
             assert "T" in payload["device"]["last_seen_at"]
             assert payload["device"]["last_seen_at"].endswith("+00:00")
@@ -88,8 +117,8 @@ class TestDashboardContract:
             db.execute("DELETE FROM devices WHERE mqtt_topic = ?", (candidate["mqtt_topic"],))
             db.commit()
 
-    def test_bind_device_rejects_duplicate_binding(self, client, auth_headers, db, monkeypatch):
-        self._restrict_discovery_to_seeded_rooms(monkeypatch)
+    def test_bind_device_rejects_duplicate_binding(self, client, auth_headers, db):
+        self._announce_unbound_light()
         candidate = client.post("/api/discovery", headers=auth_headers).json()["discovered"][0]
 
         first = client.post(
